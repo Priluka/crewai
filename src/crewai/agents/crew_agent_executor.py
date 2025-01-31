@@ -1,7 +1,7 @@
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Union, Optional
 
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.agent_builder.base_agent_executor_mixin import CrewAgentExecutorMixin
@@ -22,7 +22,6 @@ from crewai.utilities.exceptions.context_window_exceeding_exception import (
 )
 from crewai.utilities.logger import Logger
 from crewai.utilities.training_handler import CrewTrainingHandler
-
 
 @dataclass
 class ToolResult:
@@ -47,12 +46,14 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         tools_description: str,
         tools_handler: ToolsHandler,
         step_callback: Any = None,
+        stop_generating_check: Optional[Any] = None,
         original_tools: List[Any] = [],
         function_calling_llm: Any = None,
         respect_context_window: bool = False,
         request_within_rpm_limit: Any = None,
         callbacks: List[Any] = [],
     ):
+        self.stop_generating_check = stop_generating_check
         self._i18n: I18N = I18N()
         self.llm = llm
         self.task = task
@@ -152,8 +153,8 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
                             continue
 
                         else:
-                            if self.step_callback:
-                                self.step_callback(tool_result)
+                          if self.step_callback:
+                              # self.step_callback(tool_result.result)
 
                             formatted_answer.text += f"\nObservation: {tool_result.result}"
 
@@ -168,6 +169,9 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
 
                     if self.step_callback:
                         self.step_callback(formatted_answer)
+
+                    if self.stop_generating_check():
+                        return
 
                     if self._should_force_answer():
                         if self.have_forced_answer:

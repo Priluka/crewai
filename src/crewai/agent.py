@@ -1,13 +1,14 @@
 import os
 import shutil
 import subprocess
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, Type
 
 from pydantic import Field, InstanceOf, PrivateAttr, model_validator
 
 from crewai.agents import CacheHandler
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.crew_agent_executor import CrewAgentExecutor
+from crewai.agents.socket_stream_handler import SocketStreamHandler
 from crewai.cli.constants import ENV_VARS, LITELLM_PARAMS
 from crewai.knowledge.knowledge import Knowledge
 from crewai.knowledge.source.base_knowledge_source import BaseKnowledgeSource
@@ -23,6 +24,9 @@ from crewai.utilities.constants import TRAINED_AGENTS_DATA_FILE, TRAINING_DATA_F
 from crewai.utilities.converter import generate_model_description
 from crewai.utilities.token_counter_callback import TokenCalcHandler
 from crewai.utilities.training_handler import CrewTrainingHandler
+
+from crewai.agents import CrewAgentParser
+from crewai.agents.custom_parsers.gemini_parser import GeminiAgentParser
 
 agentops = None
 
@@ -61,10 +65,12 @@ class Agent(BaseAgent):
             allow_delegation: Whether the agent is allowed to delegate tasks to other agents.
             tools: Tools at agents disposal
             step_callback: Callback to be executed after each step of the agent execution.
+            stop_generating_check: Function that returns whether generation should be stopped
             knowledge_sources: Knowledge sources for the agent.
     """
 
     _times_executed: int = PrivateAttr(default=0)
+    name: str = Field(description="Name of the agent")
     max_execution_time: Optional[int] = Field(
         default=None,
         description="Maximum execution time for an agent to execute a task",
@@ -74,9 +80,9 @@ class Agent(BaseAgent):
     cache_handler: InstanceOf[CacheHandler] = Field(
         default=None, description="An instance of the CacheHandler class."
     )
-    step_callback: Optional[Any] = Field(
-        default=None,
-        description="Callback to be executed after each step of the agent execution.",
+    stop_generating_check: Optional[Any] = Field(
+      default=None,
+              description = "Function that returns whether generation should be stopped",
     )
     use_system_prompt: Optional[bool] = Field(
         default=True,
@@ -285,7 +291,7 @@ class Agent(BaseAgent):
                 schema = generate_model_description(task.output_pydantic)
 
             task_prompt += "\n" + self.i18n.slice("formatted_task_instructions").format(
-                output_format=schema
+              output_format=schema
             )
 
         if context:
@@ -356,6 +362,19 @@ class Agent(BaseAgent):
 
         return result
 
+    def _llm_is_gemini(self) -> bool:
+      """Return True if 'gemini' is found in the LLM string representation."""
+      return "gemini" in str(self.llm).lower()
+
+    def get_parser_class_for_llm(self) -> Type[CrewAgentParser]:
+      """
+      Returns GeminiAgentParser if the LLM is recognized as 'gemini'.
+      Otherwise, returns CrewAgentParser.
+      """
+      if self._llm_is_gemini():
+        return GeminiAgentParser
+      return CrewAgentParser
+
     def create_agent_executor(
         self, tools: Optional[List[BaseTool]] = None, task=None
     ) -> None:
@@ -384,26 +403,43 @@ class Agent(BaseAgent):
                 self.response_template.split("{{ .Response }}")[1].strip()
             )
 
+        # Ensure socket_stream_handler is only initialized when `task` is not None
+        socket_stream_handler = None
+        if task is not None:
+            socket_stream_handler = SocketStreamHandler(
+              socket_write_fn=self.step_callback,  # or send_to_sockets
+              agent_name=self.name,
+              task_name=task.name,
+              tools_names=", ".join(t.name for t in parsed_tools)
+          )
+
+        # Create the callbacks list, filtering out None values
+        callbacks = [
+          handler for handler in [
+            TokenCalcHandler(self._token_process),
+            socket_stream_handler
+          ] if handler is not None
+        ]
+
         self.agent_executor = CrewAgentExecutor(
-            llm=self.llm,
-            task=task,
-            agent=self,
-            crew=self.crew,
-            tools=parsed_tools,
-            prompt=prompt,
-            original_tools=tools,
-            stop_words=stop_words,
-            max_iter=self.max_iter,
-            tools_handler=self.tools_handler,
-            tools_names=self.__tools_names(parsed_tools),
-            tools_description=self._render_text_description_and_args(parsed_tools),
-            step_callback=self.step_callback,
-            function_calling_llm=self.function_calling_llm,
-            respect_context_window=self.respect_context_window,
-            request_within_rpm_limit=(
-                self._rpm_controller.check_or_wait if self._rpm_controller else None
-            ),
-            callbacks=[TokenCalcHandler(self._token_process)],
+          llm=self.llm,
+          task=task,
+          agent=self,
+          crew=self.crew,
+          tools=parsed_tools,
+          prompt=prompt,
+          original_tools=tools,
+          stop_words=stop_words,
+          max_iter=self.max_iter,
+          tools_handler=self.tools_handler,
+          tools_names=self.__tools_names(parsed_tools),
+          tools_description=self._render_text_description_and_args(parsed_tools),
+          step_callback=self.step_callback,
+          function_calling_llm=self.function_calling_llm,
+          stop_generating_check=self.stop_generating_check,
+          respect_context_window=self.respect_context_window,
+          request_within_rpm_limit=(self._rpm_controller.check_or_wait if self._rpm_controller else None),
+          callbacks=callbacks,
         )
 
     def get_delegation_tools(self, agents: List[BaseAgent]):

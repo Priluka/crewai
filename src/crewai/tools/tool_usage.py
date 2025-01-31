@@ -92,6 +92,7 @@ class ToolUsage:
             if self.agent.verbose:
                 self._printer.print(content=f"\n\n{error}\n", color="red")
             self.task.increment_tools_errors()
+            #self.tools_handler.on_tool_error(error)
             return error
 
         # BUG? The code below seems to be unreachable
@@ -124,6 +125,7 @@ class ToolUsage:
         tool: Any,
         calling: Union[ToolCalling, InstructorToolCalling],
     ) -> str:  # TODO: Fix this return type
+        self.tools_handler.on_tool_start(calling.tool_name)
         tool_event = agentops.ToolEvent(name=calling.tool_name) if agentops else None  # type: ignore
         if self._check_tool_repeated_usage(calling=calling):  # type: ignore # _check_tool_repeated_usage of "ToolUsage" does not return a value (it only ever returns None)
             try:
@@ -197,6 +199,7 @@ class ToolUsage:
                         self._printer.print(
                             content=f"\n\n{error_message}\n", color="red"
                         )
+                    self.tools_handler.on_tool_error(error_message)
                     return error  # type: ignore # No return value expected
 
                 self.task.increment_tools_errors()
@@ -249,6 +252,7 @@ class ToolUsage:
             data["result_as_answer"] = result_as_answer
 
         self.agent.tools_results.append(data)
+        self.tools_handler.on_tool_end(calling.tool_name)
 
         return result  # type: ignore # No return value expected
 

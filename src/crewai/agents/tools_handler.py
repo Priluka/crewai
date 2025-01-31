@@ -1,4 +1,6 @@
-from typing import Any, Optional, Union
+from datetime import datetime
+import uuid
+from typing import Any, Optional, Union, Callable
 
 from ..tools.cache_tools.cache_tools import CacheTools
 from ..tools.tool_calling import InstructorToolCalling, ToolCalling
@@ -11,10 +13,12 @@ class ToolsHandler:
     last_used_tool: ToolCalling = {}  # type: ignore # BUG?: Incompatible types in assignment (expression has type "Dict[...]", variable has type "ToolCalling")
     cache: Optional[CacheHandler]
 
-    def __init__(self, cache: Optional[CacheHandler] = None):
+    def __init__(self, socket_write_fn: Callable, cache: Optional[CacheHandler] = None):
         """Initialize the callback handler."""
         self.cache = cache
-        self.last_used_tool = {}  # type: ignore # BUG?: same as above
+        self.last_used_tool: Union[ToolCalling, dict] = {}
+        self.send_to_socket = socket_write_fn  # Must be a real callable
+        self.tool_chunkId: Optional[str] = None
 
     def on_tool_use(
         self,
@@ -30,3 +34,43 @@ class ToolsHandler:
                 input=calling.arguments,
                 output=output,
             )
+
+    def on_tool_start(self, tool_name: str):
+        """Handle the start of tool usage."""
+        self.tool_chunkId = str(uuid.uuid4())
+        self.send_to_socket(
+            text=f"Using tool: {tool_name.capitalize()}",
+            event="message",
+            first=True,
+            chunk_id=self.tool_chunkId,
+            timestamp=datetime.now().timestamp() * 1000,
+            display_type="inline"
+        )
+
+    def on_tool_end(self, tool_name: str):
+        """Handle the end of tool usage."""
+        self.send_to_socket(
+            text=f"Finished using tool: {tool_name.capitalize()}",
+            event="message",
+            first=True,
+            chunk_id=self.tool_chunkId,
+            timestamp=datetime.now().timestamp() * 1000,
+            display_type="inline",
+            overwrite=True
+        )
+
+    def on_tool_error(self, error_msg: str):
+        """Handle tool usage errors."""
+        self.send_to_socket(
+            text=f"""Tool usage failed:
+```
+{error_msg}
+```
+""",
+            event="message",
+            first=True,
+            chunk_id=self.tool_chunkId,
+            timestamp=datetime.now().timestamp() * 1000,
+            display_type="bubble",
+            overwrite=True
+        )

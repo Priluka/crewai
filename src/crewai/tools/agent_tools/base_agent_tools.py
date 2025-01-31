@@ -109,6 +109,7 @@ class BaseAgentTool(BaseTool):
         agent = agent[0]
         try:
             task_with_assigned_agent = Task(
+                name=task,
                 description=task,
                 agent=agent,
                 expected_output=agent.i18n.slice("manager_request"),
