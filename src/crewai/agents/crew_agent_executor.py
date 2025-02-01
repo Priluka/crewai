@@ -16,6 +16,7 @@ from crewai.agents.tools_handler import ToolsHandler
 from crewai.tools.base_tool import BaseTool
 from crewai.tools.tool_usage import ToolUsage, ToolUsageErrorException
 from crewai.utilities import I18N, Printer
+from crewai.utilities.agent_error import AgentExecutionStoppedException
 from crewai.utilities.constants import MAX_LLM_RETRY, TRAINING_DATA_FILE
 from crewai.utilities.exceptions.context_window_exceeding_exception import (
     LLMContextLengthExceededException,
@@ -112,11 +113,16 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
     def _invoke_loop(self, formatted_answer=None):
         try:
             while not isinstance(formatted_answer, AgentFinish):
+                if self.stop_generating_check():
+                    raise AgentExecutionStoppedException()
                 if not self.request_within_rpm_limit or self.request_within_rpm_limit():
                     answer = self.llm.call(
                         self.messages,
                         callbacks=self.callbacks,
                     )
+
+                    if self.stop_generating_check():
+                      raise AgentExecutionStoppedException()
 
                     if answer is None or answer == "":
                         self._printer.print(
@@ -171,7 +177,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
                         self.step_callback(formatted_answer)
 
                     if self.stop_generating_check():
-                        return
+                        raise AgentExecutionStoppedException()
 
                     if self._should_force_answer():
                         if self.have_forced_answer:

@@ -17,8 +17,11 @@ from pydantic import (
     model_validator,
 )
 from pydantic_core import PydanticCustomError
+from socketio import SimpleClient
+import asyncio
 
 from crewai.agent import Agent
+from crewai.agentcloud.socket_io import AgentCloudSocketIO
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.cache import CacheHandler
 from crewai.crews.crew_output import CrewOutput
@@ -82,6 +85,8 @@ class Crew(BaseModel):
         share_crew: Whether you want to share the complete crew information and execution with crewAI to make the library better, and allow us to train models.
         planning: Plan the crew execution and add the plan to the crew.
     """
+
+
 
     __hash__ = object.__hash__  # type: ignore
     _execution_span: Any = PrivateAttr()
@@ -198,6 +203,21 @@ class Crew(BaseModel):
     execution_logs: List[Dict[str, Any]] = Field(
         default=[],
         description="List of execution logs for tasks",
+    )
+    model_config = {
+      "arbitrary_types_allowed": True
+    }
+    agentcloud_socket: SimpleClient = Field(
+      default=None,
+      description="Socket to communicate with Agentcloud webapp"
+    )
+    agentcloud_session_id: str = Field(
+      default=None,
+      description="ID of the Agentcloud session"
+    )
+    stop_generating_check: Optional[Any] = Field(
+      default_factory=lambda: lambda: False,
+      description="Function that returns whether generation should be stopped",
     )
     knowledge_sources: Optional[List[BaseKnowledgeSource]] = Field(
         default=None,
@@ -332,11 +352,19 @@ class Crew(BaseModel):
                 {},
             )
 
+        if not self.agentcloud_socket and not self.agentcloud_session_id:
+          raise PydanticCustomError(
+            "missing_teamora_config",
+            "Either 'agentcloud_socket' or 'agentcloud_session_id' need to be set.",
+            {},
+          )
         if self.config:
             self._setup_from_config()
 
         if self.agents:
+            socket_io = AgentCloudSocketIO(self.agentcloud_socket, self.agentcloud_session_id)
             for agent in self.agents:
+                agent.set_agentcloud_socket_io(socket_io)
                 if self.cache:
                     agent.set_cache_handler(self._cache_handler)
                 if self.max_rpm:
@@ -677,6 +705,7 @@ class Crew(BaseModel):
                 or self.manager_llm
             )
             manager = Agent(
+                name=i18n.retrieve("hierarchical_manager_agent", "role"),
                 role=i18n.retrieve("hierarchical_manager_agent", "role"),
                 goal=i18n.retrieve("hierarchical_manager_agent", "goal"),
                 backstory=i18n.retrieve("hierarchical_manager_agent", "backstory"),
@@ -684,7 +713,11 @@ class Crew(BaseModel):
                 allow_delegation=True,
                 llm=self.manager_llm,
                 verbose=self.verbose,
+                stop_generating_check=self.stop_generating_check
             )
+            _socket_io = AgentCloudSocketIO(self.agentcloud_socket, self.agentcloud_session_id)
+            manager.set_agentcloud_socket_io(_socket_io)
+            manager.set_tools_handler()
             self.manager_agent = manager
         manager.crew = self
 
@@ -1042,6 +1075,10 @@ class Crew(BaseModel):
         for task in self.tasks:
             if not task.callback:
                 task.callback = self.task_callback
+            else:
+                original_callback = task.callback
+                task_callback = self.task_callback
+                task.callback = lambda output, oc=original_callback, tc=task_callback: (oc(output), tc())
 
     def _interpolate_inputs(self, inputs: Dict[str, Any]) -> None:
         """Interpolates the inputs in the tasks and agents."""

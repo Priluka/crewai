@@ -61,6 +61,7 @@ class Task(BaseModel):
         output_json: Pydantic model for structuring JSON output.
         output_pydantic: Pydantic model for task output.
         tools: List of tools/resources limited for task execution.
+        stream_only_final_output: Controls whether intermediate Thought/Action steps of the agent are streamed to the client
     """
 
     __hash__ = object.__hash__  # type: ignore
@@ -75,6 +76,10 @@ class Task(BaseModel):
     description: str = Field(description="Description of the actual task.")
     expected_output: str = Field(
         description="Clear definition of expected output for the task."
+    )
+    stream_only_final_output: Optional[bool] = Field(
+      description="Controls whether intermediate Thought/Action steps of the agent are streamed to the client",
+      default=False,
     )
     config: Optional[Dict[str, Any]] = Field(
         description="Configuration for the agent",

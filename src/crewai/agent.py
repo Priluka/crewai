@@ -8,7 +8,7 @@ from pydantic import Field, InstanceOf, PrivateAttr, model_validator
 from crewai.agents import CacheHandler
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.crew_agent_executor import CrewAgentExecutor
-from crewai.agents.socket_stream_handler import SocketStreamHandler
+from crewai.agentcloud.socket_stream_handler import SocketStreamHandler
 from crewai.cli.constants import ENV_VARS, LITELLM_PARAMS
 from crewai.knowledge.knowledge import Knowledge
 from crewai.knowledge.source.base_knowledge_source import BaseKnowledgeSource
@@ -20,6 +20,7 @@ from crewai.tools import BaseTool
 from crewai.tools.agent_tools.agent_tools import AgentTools
 from crewai.tools.base_tool import Tool
 from crewai.utilities import Converter, Prompts
+from crewai.utilities.agent_error import AgentExecutionStoppedException
 from crewai.utilities.constants import TRAINED_AGENTS_DATA_FILE, TRAINING_DATA_FILE
 from crewai.utilities.converter import generate_model_description
 from crewai.utilities.token_counter_callback import TokenCalcHandler
@@ -81,8 +82,8 @@ class Agent(BaseAgent):
         default=None, description="An instance of the CacheHandler class."
     )
     stop_generating_check: Optional[Any] = Field(
-      default=None,
-              description = "Function that returns whether generation should be stopped",
+      default_factory=lambda: lambda: False,
+      description="Function that returns whether generation should be stopped",
     )
     use_system_prompt: Optional[bool] = Field(
         default=True,
@@ -335,6 +336,9 @@ class Agent(BaseAgent):
         else:
             task_prompt = self._use_trained_data(task_prompt=task_prompt)
 
+        if self.stop_generating_check():
+            return "Agent execution terminated by user"
+
         try:
             result = self.agent_executor.invoke(
                 {
@@ -407,10 +411,11 @@ class Agent(BaseAgent):
         socket_stream_handler = None
         if task is not None:
             socket_stream_handler = SocketStreamHandler(
-              socket_write_fn=self.step_callback,  # or send_to_sockets
+              socket_io=self.agentcloud_socket_io,  # or send_to_sockets
               agent_name=self.name,
               task_name=task.name,
-              tools_names=", ".join(t.name for t in parsed_tools)
+              tools_names=self.agent_executor.tools_names,
+              stream_only_final_output=task.stream_only_final_output
           )
 
         # Create the callbacks list, filtering out None values
@@ -435,7 +440,7 @@ class Agent(BaseAgent):
           tools_names=self.__tools_names(parsed_tools),
           tools_description=self._render_text_description_and_args(parsed_tools),
           step_callback=self.step_callback,
-          function_calling_llm=self.function_calling_llm,
+          function_calling_llm=self.function_calling_llm or self.llm,
           stop_generating_check=self.stop_generating_check,
           respect_context_window=self.respect_context_window,
           request_within_rpm_limit=(self._rpm_controller.check_or_wait if self._rpm_controller else None),

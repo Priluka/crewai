@@ -15,6 +15,7 @@ from pydantic import (
 )
 from pydantic_core import PydanticCustomError
 
+from crewai.agentcloud.socket_io import AgentCloudSocketIO
 from crewai.agents.agent_builder.utilities.base_token_process import TokenProcess
 from crewai.agents.cache.cache_handler import CacheHandler
 from crewai.agents.tools_handler import ToolsHandler
@@ -126,6 +127,16 @@ class BaseAgent(ABC, BaseModel):
     )
     tools_handler: InstanceOf[ToolsHandler] = Field(
         default=None, description="An instance of the ToolsHandler class."
+    )
+    model_config = {
+      "arbitrary_types_allowed": True
+    }
+    model_config = {
+      "arbitrary_types_allowed": True
+    }
+    agentcloud_socket_io: AgentCloudSocketIO = Field(
+      default=None,
+      description="An instance of the AgentCloudSocketIO class.",
     )
     step_callback: Optional[Any] = Field(
       default=None,
@@ -284,13 +295,16 @@ class BaseAgent(ABC, BaseModel):
             self.goal = self._original_goal.format(**inputs)
             self.backstory = self._original_backstory.format(**inputs)
 
+    def set_tools_handler(self):
+      self.tools_handler = ToolsHandler(socket_io=self.agentcloud_socket_io)
+
     def set_cache_handler(self, cache_handler: CacheHandler) -> None:
         """Set the cache handler for the agent.
 
         Args:
             cache_handler: An instance of the CacheHandler class.
         """
-        self.tools_handler = ToolsHandler(socket_write_fn=self.step_callback)
+        self.set_tools_handler()
         if self.cache:
             self.cache_handler = cache_handler
             self.tools_handler.cache = cache_handler
@@ -308,3 +322,6 @@ class BaseAgent(ABC, BaseModel):
         if not self._rpm_controller:
             self._rpm_controller = rpm_controller
             self.create_agent_executor()
+
+    def set_agentcloud_socket_io(self, socket_io: AgentCloudSocketIO) -> None:
+      self.agentcloud_socket_io = socket_io
