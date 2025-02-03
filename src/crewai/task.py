@@ -399,11 +399,11 @@ class Task(BaseModel):
                 self.retry_count += 1
                 context = self.i18n.errors("validation_error").format(
                     guardrail_result_error=guardrail_result.error,
-                    task_output=task_output.raw
+                    task_output=task_output.raw,
                 )
                 printer = Printer()
                 printer.print(
-                    content=f"Guardrail blocked, retrying, due to:{guardrail_result.error}\n",
+                    content=f"Guardrail blocked, retrying, due to: {guardrail_result.error}\n",
                     color="yellow",
                 )
                 return self._execute_core(agent, context, tools)
@@ -459,8 +459,11 @@ class Task(BaseModel):
         tasks_slices = [self.description, output]
         return "\n".join(tasks_slices)
 
-    def interpolate_inputs(self, inputs: Dict[str, Union[str, int, float]]) -> None:
+    def interpolate_inputs_and_add_conversation_history(
+        self, inputs: Dict[str, Union[str, int, float, Dict[str, Any], List[Any]]]
+    ) -> None:
         """Interpolate inputs into the task description, expected output, and output file path.
+           Add conversation history if present.
 
         Args:
             inputs: Dictionary mapping template variables to their values.
@@ -505,8 +508,33 @@ class Task(BaseModel):
                     f"Error interpolating output_file path: {str(e)}"
                 ) from e
 
+        if "crew_chat_messages" in inputs and inputs["crew_chat_messages"]:
+            conversation_instruction = self.i18n.slice(
+                "conversation_history_instruction"
+            )
+
+            crew_chat_messages_json = str(inputs["crew_chat_messages"])
+
+            try:
+                crew_chat_messages = json.loads(crew_chat_messages_json)
+            except json.JSONDecodeError as e:
+                print("An error occurred while parsing crew chat messages:", e)
+                raise
+
+            conversation_history = "\n".join(
+                f"{msg['role'].capitalize()}: {msg['content']}"
+                for msg in crew_chat_messages
+                if isinstance(msg, dict) and "role" in msg and "content" in msg
+            )
+
+            self.description += (
+                f"\n\n{conversation_instruction}\n\n{conversation_history}"
+            )
+
     def interpolate_only(
-        self, input_string: Optional[str], inputs: Dict[str, Union[str, int, float]]
+        self,
+        input_string: Optional[str],
+        inputs: Dict[str, Union[str, int, float, Dict[str, Any], List[Any]]],
     ) -> str:
         """Interpolate placeholders (e.g., {key}) in a string while leaving JSON untouched.
 
@@ -514,17 +542,39 @@ class Task(BaseModel):
             input_string: The string containing template variables to interpolate.
                          Can be None or empty, in which case an empty string is returned.
             inputs: Dictionary mapping template variables to their values.
-                   Supported value types are strings, integers, and floats.
-                   If input_string is empty or has no placeholders, inputs can be empty.
+                   Supported value types are strings, integers, floats, and dicts/lists
+                   containing only these types and other nested dicts/lists.
 
         Returns:
             The interpolated string with all template variables replaced with their values.
             Empty string if input_string is None or empty.
 
         Raises:
-            ValueError: If a required template variable is missing from inputs.
-            KeyError: If a template variable is not found in the inputs dictionary.
+            ValueError: If a value contains unsupported types
         """
+
+        # Validation function for recursive type checking
+        def validate_type(value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, (str, int, float, bool)):
+                return
+            if isinstance(value, (dict, list)):
+                for item in value.values() if isinstance(value, dict) else value:
+                    validate_type(item)
+                return
+            raise ValueError(
+                f"Unsupported type {type(value).__name__} in inputs. "
+                "Only str, int, float, bool, dict, and list are allowed."
+            )
+
+        # Validate all input values
+        for key, value in inputs.items():
+            try:
+                validate_type(value)
+            except ValueError as e:
+                raise ValueError(f"Invalid value for key '{key}': {str(e)}") from e
+
         if input_string is None or not input_string:
             return ""
         if "{" not in input_string and "}" not in input_string:
@@ -533,15 +583,7 @@ class Task(BaseModel):
             raise ValueError(
                 "Inputs dictionary cannot be empty when interpolating variables"
             )
-
         try:
-            # Validate input types
-            for key, value in inputs.items():
-                if not isinstance(value, (str, int, float)):
-                    raise ValueError(
-                        f"Value for key '{key}' must be a string, integer, or float, got {type(value).__name__}"
-                    )
-
             escaped_string = input_string.replace("{", "{{").replace("}", "}}")
 
             for key in inputs.keys():

@@ -14,8 +14,10 @@ from crewai.agent import Agent
 from crewai.agents.cache import CacheHandler
 from crewai.crew import Crew
 from crewai.crews.crew_output import CrewOutput
+from crewai.knowledge.source.string_knowledge_source import StringKnowledgeSource
 from crewai.memory.contextual.contextual_memory import ContextualMemory
 from crewai.process import Process
+from crewai.project import crew
 from crewai.task import Task
 from crewai.tasks.conditional_task import ConditionalTask
 from crewai.tasks.output_format import OutputFormat
@@ -554,12 +556,12 @@ def test_crew_with_delegating_agents_should_not_override_task_tools():
         _, kwargs = mock_execute_sync.call_args
         tools = kwargs["tools"]
 
-        assert any(
-            isinstance(tool, TestTool) for tool in tools
-        ), "TestTool should be present"
-        assert any(
-            "delegate" in tool.name.lower() for tool in tools
-        ), "Delegation tool should be present"
+        assert any(isinstance(tool, TestTool) for tool in tools), (
+            "TestTool should be present"
+        )
+        assert any("delegate" in tool.name.lower() for tool in tools), (
+            "Delegation tool should be present"
+        )
 
 
 @pytest.mark.vcr(filter_headers=["authorization"])
@@ -618,12 +620,12 @@ def test_crew_with_delegating_agents_should_not_override_agent_tools():
         _, kwargs = mock_execute_sync.call_args
         tools = kwargs["tools"]
 
-        assert any(
-            isinstance(tool, TestTool) for tool in new_ceo.tools
-        ), "TestTool should be present"
-        assert any(
-            "delegate" in tool.name.lower() for tool in tools
-        ), "Delegation tool should be present"
+        assert any(isinstance(tool, TestTool) for tool in new_ceo.tools), (
+            "TestTool should be present"
+        )
+        assert any("delegate" in tool.name.lower() for tool in tools), (
+            "Delegation tool should be present"
+        )
 
 
 @pytest.mark.vcr(filter_headers=["authorization"])
@@ -747,17 +749,17 @@ def test_task_tools_override_agent_tools_with_allow_delegation():
         used_tools = kwargs["tools"]
 
         # Confirm AnotherTestTool is present but TestTool is not
-        assert any(
-            isinstance(tool, AnotherTestTool) for tool in used_tools
-        ), "AnotherTestTool should be present"
-        assert not any(
-            isinstance(tool, TestTool) for tool in used_tools
-        ), "TestTool should not be present among used tools"
+        assert any(isinstance(tool, AnotherTestTool) for tool in used_tools), (
+            "AnotherTestTool should be present"
+        )
+        assert not any(isinstance(tool, TestTool) for tool in used_tools), (
+            "TestTool should not be present among used tools"
+        )
 
         # Confirm delegation tool(s) are present
-        assert any(
-            "delegate" in tool.name.lower() for tool in used_tools
-        ), "Delegation tool should be present"
+        assert any("delegate" in tool.name.lower() for tool in used_tools), (
+            "Delegation tool should be present"
+        )
 
     # Finally, make sure the agent's original tools remain unchanged
     assert len(researcher_with_delegation.tools) == 1
@@ -1227,6 +1229,7 @@ def test_kickoff_for_each_empty_input():
     assert results == []
 
 
+@pytest.mark.vcr(filter_headers=["authorization"])
 def test_kickoff_for_each_invalid_input():
     """Tests if kickoff_for_each raises TypeError for invalid input types."""
 
@@ -1464,39 +1467,34 @@ def test_dont_set_agents_step_callback_if_already_set():
 
 @pytest.mark.vcr(filter_headers=["authorization"])
 def test_crew_function_calling_llm():
-    from unittest.mock import patch
-
+    from crewai import LLM
     from crewai.tools import tool
 
-    llm = "gpt-4o"
+    llm = LLM(model="gpt-4o-mini")
 
     @tool
-    def learn_about_AI() -> str:
-        """Useful for when you need to learn about AI to write an paragraph about it."""
-        return "AI is a very broad field."
+    def look_up_greeting() -> str:
+        """Tool used to retrieve a greeting."""
+        return "Howdy!"
 
     agent1 = Agent(
-        role="test role",
-        goal="test goal",
-        backstory="test backstory",
-        tools=[learn_about_AI],
+        role="Greeter",
+        goal="Say hello.",
+        backstory="You are a friendly greeter.",
+        tools=[look_up_greeting],
         llm="gpt-4o-mini",
         function_calling_llm=llm,
     )
 
     essay = Task(
-        description="Write and then review an small paragraph on AI until it's AMAZING",
-        expected_output="The final paragraph.",
+        description="Look up the greeting and say it.",
+        expected_output="A greeting.",
         agent=agent1,
     )
-    tasks = [essay]
-    crew = Crew(agents=[agent1], tasks=tasks)
 
-    with patch.object(
-        instructor, "from_litellm", wraps=instructor.from_litellm
-    ) as mock_from_litellm:
-        crew.kickoff()
-        mock_from_litellm.assert_called()
+    crew = Crew(agents=[agent1], tasks=[essay])
+    result = crew.kickoff()
+    assert result.raw == "Howdy!"
 
 
 @pytest.mark.vcr(filter_headers=["authorization"])
@@ -1562,9 +1560,9 @@ def test_code_execution_flag_adds_code_tool_upon_kickoff():
 
         # Verify that exactly one tool was used and it was a CodeInterpreterTool
         assert len(used_tools) == 1, "Should have exactly one tool"
-        assert isinstance(
-            used_tools[0], CodeInterpreterTool
-        ), "Tool should be CodeInterpreterTool"
+        assert isinstance(used_tools[0], CodeInterpreterTool), (
+            "Tool should be CodeInterpreterTool"
+        )
 
 
 @pytest.mark.vcr(filter_headers=["authorization"])
@@ -1846,7 +1844,9 @@ def test_crew_inputs_interpolate_both_agents_and_tasks_diff():
             Agent, "interpolate_inputs", wraps=agent.interpolate_inputs
         ) as interpolate_agent_inputs:
             with patch.object(
-                Task, "interpolate_inputs", wraps=task.interpolate_inputs
+                Task,
+                "interpolate_inputs_and_add_conversation_history",
+                wraps=task.interpolate_inputs_and_add_conversation_history,
             ) as interpolate_task_inputs:
                 execute.return_value = "ok"
                 crew.kickoff(inputs={"topic": "AI", "points": 5})
@@ -1873,7 +1873,9 @@ def test_crew_does_not_interpolate_without_inputs():
     crew = Crew(agents=[agent], tasks=[task])
 
     with patch.object(Agent, "interpolate_inputs") as interpolate_agent_inputs:
-        with patch.object(Task, "interpolate_inputs") as interpolate_task_inputs:
+        with patch.object(
+            Task, "interpolate_inputs_and_add_conversation_history"
+        ) as interpolate_task_inputs:
             crew.kickoff()
             interpolate_agent_inputs.assert_not_called()
             interpolate_task_inputs.assert_not_called()
@@ -3087,6 +3089,29 @@ def test_hierarchical_verbose_false_manager_agent():
     assert not crew.manager_agent.verbose
 
 
+def test_fetch_inputs():
+    agent = Agent(
+        role="{role_detail} Researcher",
+        goal="Research on {topic}.",
+        backstory="Expert in {field}.",
+    )
+
+    task = Task(
+        description="Analyze the data on {topic}.",
+        expected_output="Summary of {topic} analysis.",
+        agent=agent,
+    )
+
+    crew = Crew(agents=[agent], tasks=[task])
+
+    expected_placeholders = {"role_detail", "topic", "field"}
+    actual_placeholders = crew.fetch_inputs()
+
+    assert actual_placeholders == expected_placeholders, (
+        f"Expected {expected_placeholders}, but got {actual_placeholders}"
+    )
+
+
 def test_task_tools_preserve_code_execution_tools():
     """
     Test that task tools don't override code execution tools when allow_code_execution=True
@@ -3157,20 +3182,20 @@ def test_task_tools_preserve_code_execution_tools():
         used_tools = kwargs["tools"]
 
         # Verify all expected tools are present
-        assert any(
-            isinstance(tool, TestTool) for tool in used_tools
-        ), "Task's TestTool should be present"
-        assert any(
-            isinstance(tool, CodeInterpreterTool) for tool in used_tools
-        ), "CodeInterpreterTool should be present"
-        assert any(
-            "delegate" in tool.name.lower() for tool in used_tools
-        ), "Delegation tool should be present"
+        assert any(isinstance(tool, TestTool) for tool in used_tools), (
+            "Task's TestTool should be present"
+        )
+        assert any(isinstance(tool, CodeInterpreterTool) for tool in used_tools), (
+            "CodeInterpreterTool should be present"
+        )
+        assert any("delegate" in tool.name.lower() for tool in used_tools), (
+            "Delegation tool should be present"
+        )
 
         # Verify the total number of tools (TestTool + CodeInterpreter + 2 delegation tools)
-        assert (
-            len(used_tools) == 4
-        ), "Should have TestTool, CodeInterpreter, and 2 delegation tools"
+        assert len(used_tools) == 4, (
+            "Should have TestTool, CodeInterpreter, and 2 delegation tools"
+        )
 
 
 @pytest.mark.vcr(filter_headers=["authorization"])
@@ -3214,9 +3239,9 @@ def test_multimodal_flag_adds_multimodal_tools():
         used_tools = kwargs["tools"]
 
         # Check that the multimodal tool was added
-        assert any(
-            isinstance(tool, AddImageTool) for tool in used_tools
-        ), "AddImageTool should be present when agent is multimodal"
+        assert any(isinstance(tool, AddImageTool) for tool in used_tools), (
+            "AddImageTool should be present when agent is multimodal"
+        )
 
         # Verify we have exactly one tool (just the AddImageTool)
         assert len(used_tools) == 1, "Should only have the AddImageTool"
@@ -3350,11 +3375,17 @@ def test_crew_with_failing_task_guardrails():
         """
         content = result.raw.strip()
 
-        if not ('REPORT:' in content or '**REPORT:**' in content):
-            return (False, "Output must start with 'REPORT:' no formatting, just the word REPORT")
+        if not ("REPORT:" in content or "**REPORT:**" in content):
+            return (
+                False,
+                "Output must start with 'REPORT:' no formatting, just the word REPORT",
+            )
 
-        if not ('END REPORT' in content or '**END REPORT**' in content):
-            return (False, "Output must end with 'END REPORT' no formatting, just the word END REPORT")
+        if not ("END REPORT" in content or "**END REPORT**" in content):
+            return (
+                False,
+                "Output must end with 'END REPORT' no formatting, just the word END REPORT",
+            )
 
         return (True, content)
 
@@ -3369,7 +3400,7 @@ def test_crew_with_failing_task_guardrails():
         expected_output="A properly formatted report",
         agent=researcher,
         guardrail=strict_format_guardrail,
-        max_retries=3
+        max_retries=3,
     )
 
     crew = Crew(
@@ -3381,8 +3412,8 @@ def test_crew_with_failing_task_guardrails():
 
     # Verify the final output meets all format requirements
     content = result.raw.strip()
-    assert content.startswith('REPORT:'), "Output should start with 'REPORT:'"
-    assert content.endswith('END REPORT'), "Output should end with 'END REPORT'"
+    assert content.startswith("REPORT:"), "Output should start with 'REPORT:'"
+    assert content.endswith("END REPORT"), "Output should end with 'END REPORT'"
 
     # Verify task output
     task_output = result.tasks_output[0]
@@ -3407,7 +3438,7 @@ def test_crew_guardrail_feedback_in_context():
         role="Writer",
         goal="Write content with specific keywords",
         backstory="You're an expert at following specific writing requirements.",
-        allow_delegation=False
+        allow_delegation=False,
     )
 
     task = Task(
@@ -3415,7 +3446,7 @@ def test_crew_guardrail_feedback_in_context():
         expected_output="A response containing the keyword 'IMPORTANT'",
         agent=researcher,
         guardrail=format_guardrail,
-        max_retries=2
+        max_retries=2,
     )
 
     crew = Crew(agents=[researcher], tasks=[task])
@@ -3436,11 +3467,149 @@ def test_crew_guardrail_feedback_in_context():
     assert len(execution_contexts) > 1, "Task should have been executed multiple times"
 
     # Verify that the second execution included the guardrail feedback
-    assert "Output must contain the keyword 'IMPORTANT'" in execution_contexts[1], \
+    assert "Output must contain the keyword 'IMPORTANT'" in execution_contexts[1], (
         "Guardrail feedback should be included in retry context"
+    )
 
     # Verify final output meets guardrail requirements
     assert "IMPORTANT" in result.raw, "Final output should contain required keyword"
 
     # Verify task retry count
     assert task.retry_count == 1, "Task should have been retried once"
+
+
+@pytest.mark.vcr(filter_headers=["authorization"])
+def test_before_kickoff_callback():
+    from crewai.project import CrewBase, agent, before_kickoff, task
+
+    @CrewBase
+    class TestCrewClass:
+        from crewai.project import crew
+
+        agents_config = None
+        tasks_config = None
+
+        def __init__(self):
+            self.inputs_modified = False
+
+        @before_kickoff
+        def modify_inputs(self, inputs):
+            self.inputs_modified = True
+            inputs["modified"] = True
+            return inputs
+
+        @agent
+        def my_agent(self):
+            return Agent(
+                role="Test Agent",
+                goal="Test agent goal",
+                backstory="Test agent backstory",
+            )
+
+        @task
+        def my_task(self):
+            task = Task(
+                description="Test task description",
+                expected_output="Test expected output",
+                agent=self.my_agent(),
+            )
+            return task
+
+        @crew
+        def crew(self):
+            return Crew(agents=self.agents, tasks=self.tasks)
+
+    test_crew_instance = TestCrewClass()
+
+    test_crew = test_crew_instance.crew()
+
+    # Verify that the before_kickoff_callbacks are set
+    assert len(test_crew.before_kickoff_callbacks) == 1
+
+    # Prepare inputs
+    inputs = {"initial": True}
+
+    # Call kickoff
+    test_crew.kickoff(inputs=inputs)
+
+    # Check that the before_kickoff function was called and modified inputs
+    assert test_crew_instance.inputs_modified
+    assert inputs.get("modified")
+
+
+@pytest.mark.vcr(filter_headers=["authorization"])
+def test_before_kickoff_without_inputs():
+    from crewai.project import CrewBase, agent, before_kickoff, task
+
+    @CrewBase
+    class TestCrewClass:
+        from crewai.project import crew
+
+        agents_config = None
+        tasks_config = None
+
+        def __init__(self):
+            self.inputs_modified = False
+            self.received_inputs = None
+
+        @before_kickoff
+        def modify_inputs(self, inputs):
+            self.inputs_modified = True
+            inputs["modified"] = True
+            self.received_inputs = inputs
+            return inputs
+
+        @agent
+        def my_agent(self):
+            return Agent(
+                role="Test Agent",
+                goal="Test agent goal",
+                backstory="Test agent backstory",
+            )
+
+        @task
+        def my_task(self):
+            return Task(
+                description="Test task description",
+                expected_output="Test expected output",
+                agent=self.my_agent(),
+            )
+
+        @crew
+        def crew(self):
+            return Crew(agents=self.agents, tasks=self.tasks)
+
+    # Instantiate the class
+    test_crew_instance = TestCrewClass()
+    # Build the crew
+    test_crew = test_crew_instance.crew()
+    # Verify that the before_kickoff_callback is registered
+    assert len(test_crew.before_kickoff_callbacks) == 1
+
+    # Call kickoff without passing inputs
+    test_crew.kickoff()
+
+    # Check that the before_kickoff function was called
+    assert test_crew_instance.inputs_modified
+
+    # Verify that the inputs were initialized and modified inside the before_kickoff method
+    assert test_crew_instance.received_inputs is not None
+    assert test_crew_instance.received_inputs.get("modified") is True
+
+
+@pytest.mark.vcr(filter_headers=["authorization"])
+def test_crew_with_knowledge_sources_works_with_copy():
+    content = "Brandon's favorite color is red and he likes Mexican food."
+    string_source = StringKnowledgeSource(content=content)
+
+    crew = Crew(
+        agents=[researcher, writer],
+        tasks=[Task(description="test", expected_output="test", agent=researcher)],
+        knowledge_sources=[string_source],
+    )
+
+    crew_copy = crew.copy()
+
+    assert crew_copy.knowledge_sources == crew.knowledge_sources
+    assert len(crew_copy.agents) == len(crew.agents)
+    assert len(crew_copy.tasks) == len(crew.tasks)
