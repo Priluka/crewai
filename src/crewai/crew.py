@@ -365,6 +365,7 @@ class Crew(BaseModel):
             socket_io = AgentCloudSocketIO(self.agentcloud_socket, self.agentcloud_session_id)
             for agent in self.agents:
                 agent.set_agentcloud_socket_io(socket_io)
+                agent.set_tools_handler()
                 if self.cache:
                     agent.set_cache_handler(self._cache_handler)
                 if self.max_rpm:

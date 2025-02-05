@@ -21,7 +21,6 @@ class ToolsHandler:
         self.last_used_tool: Union[ToolCalling, dict] = {}
         self.socket_io = socket_io
         self.tool_chunkId = None
-        self.tool_chunkId: Optional[str] = None
 
     def on_tool_use(
         self,
