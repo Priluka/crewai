@@ -307,14 +307,6 @@ class Agent(BaseAgent):
       """Return True if 'gemini' is found in the LLM string representation."""
       return "gemini" in str(self.llm).lower()
 
-    def get_parser_class_for_llm(self) -> Type[CrewAgentParser]:
-      """
-      Returns GeminiAgentParser if the LLM is recognized as 'gemini'.
-      Otherwise, returns CrewAgentParser.
-      """
-      if self._llm_is_gemini():
-        return GeminiAgentParser
-      return CrewAgentParser
 
     def create_agent_executor(
         self, tools: Optional[List[BaseTool]] = None, task=None
