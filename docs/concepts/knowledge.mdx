@@ -91,7 +91,13 @@ result = crew.kickoff(inputs={"question": "What city does John live in and how o
 ```
 
 
-Here's another example with the `CrewDoclingSource`. The CrewDoclingSource is actually quite versatile and can handle multiple file formats including TXT, PDF, DOCX, HTML, and more. 
+Here's another example with the `CrewDoclingSource`. The CrewDoclingSource is actually quite versatile and can handle multiple file formats including MD, PDF, DOCX, HTML, and more. 
+
+<Note>
+  You need to install `docling` for the following example to work: `uv add docling`
+</Note>
+
+
 
 ```python Code
 from crewai import LLM, Agent, Crew, Process, Task
@@ -144,12 +150,14 @@ result = crew.kickoff(
 
 Here are examples of how to use different types of knowledge sources:
 
+Note: Please ensure that you create the ./knowldge folder. All source files (e.g., .txt, .pdf, .xlsx, .json) should be placed in this folder for centralized management.
+
 ### Text File Knowledge Source
 ```python
-from crewai.knowledge.source.crew_docling_source import CrewDoclingSource
+from crewai.knowledge.source.text_file_knowledge_source import TextFileKnowledgeSource
 
 # Create a text file knowledge source
-text_source = CrewDoclingSource(
+text_source = TextFileKnowledgeSource(
     file_paths=["document.txt", "another.txt"]
 )
 
@@ -282,6 +290,7 @@ The `embedder` parameter supports various embedding model providers that include
 - `ollama`: Local embeddings with Ollama
 - `vertexai`: Google Cloud VertexAI embeddings
 - `cohere`: Cohere's embedding models
+- `voyageai`: VoyageAI's embedding models
 - `bedrock`: AWS Bedrock embeddings
 - `huggingface`: Hugging Face models
 - `watson`: IBM Watson embeddings
@@ -317,6 +326,13 @@ agent = Agent(
     verbose=True,
     allow_delegation=False,
     llm=gemini_llm,
+    embedder={
+        "provider": "google",
+        "config": {
+            "model": "models/text-embedding-004",
+            "api_key": GEMINI_API_KEY,
+        }
+    }
 )
 
 task = Task(
@@ -446,12 +462,12 @@ class SpaceNewsKnowledgeSource(BaseKnowledgeSource):
             data = response.json()
             articles = data.get('results', [])
 
-            formatted_data = self._format_articles(articles)
+            formatted_data = self.validate_content(articles)
             return {self.api_endpoint: formatted_data}
         except Exception as e:
             raise ValueError(f"Failed to fetch space news: {str(e)}")
 
-    def _format_articles(self, articles: list) -> str:
+    def validate_content(self, articles: list) -> str:
         """Format articles into readable text."""
         formatted = "Space News Articles:\n\n"
         for article in articles:

@@ -94,6 +94,13 @@ class CrewAgentParser:
 
         elif includes_answer:
             final_answer = text.split(FINAL_ANSWER_ACTION)[-1].strip()
+            # Check whether the final answer ends with triple backticks.
+            if final_answer.endswith("```"):
+                # Count occurrences of triple backticks in the final answer.
+                count = final_answer.count("```")
+                # If count is odd then it's an unmatched trailing set; remove it.
+                if count % 2 != 0:
+                    final_answer = final_answer[:-3].rstrip()
             return AgentFinish(thought, final_answer, text)
 
         if not re.search(r"Action\s*\d*\s*:[\s]*(.*?)", text, re.DOTALL):
@@ -117,15 +124,19 @@ class CrewAgentParser:
             )
 
     def _extract_thought(self, text: str) -> str:
-        regex = r"(.*?)(?:\n\nAction|\n\nFinal Answer)"
-        thought_match = re.search(regex, text, re.DOTALL)
-        if thought_match:
-            return thought_match.group(1).strip()
-        return ""
+        thought_index = text.find("\nAction")
+        if thought_index == -1:
+            thought_index = text.find("\nFinal Answer")
+        if thought_index == -1:
+            return ""
+        thought = text[:thought_index].strip()
+        # Remove any triple backticks from the thought string
+        thought = thought.replace("```", "").strip()
+        return thought
 
     def _clean_action(self, text: str) -> str:
         """Clean action string by removing non-essential formatting characters."""
-        return re.sub(r"^\s*\*+\s*|\s*\*+\s*$", "", text).strip()
+        return text.strip().strip("*").strip()
 
     def _safe_repair_json(self, tool_input: str) -> str:
         UNABLE_TO_REPAIR_JSON_RESULTS = ['""', "{}"]

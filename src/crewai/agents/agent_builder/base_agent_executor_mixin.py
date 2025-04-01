@@ -19,14 +19,9 @@ class CrewAgentExecutorMixin:
     agent: Optional["BaseAgent"]
     task: Optional["Task"]
     iterations: int
-    have_forced_answer: bool
     max_iter: int
     _i18n: I18N
     _printer: Printer = Printer()
-
-    def _should_force_answer(self) -> bool:
-        """Determine if a forced answer is required based on iteration count."""
-        return (self.iterations >= self.max_iter) and not self.have_forced_answer
 
     def _create_short_term_memory(self, output) -> None:
         """Create and save a short-term memory item if conditions are met."""
@@ -99,9 +94,11 @@ class CrewAgentExecutorMixin:
                 print(f"Failed to add to long term memory: {e}")
                 pass
 
-    def _ask_human_input(self, final_answer: str) -> str:
-      return self.agent.agentcloud_socket_io.get_human_input(
-        # `final_answer` is usually a string; adding a type-check to be safe and
-        # compatible with typespec in function signature
-        input_prompt=final_answer if type(final_answer) is str else str(final_answer)
-      )
+
+def _ask_human_input(self, final_answer: str) -> str:
+  return self.agent.agentcloud_socket_io.get_human_input(
+    # `final_answer` is usually a string; adding a type-check to be safe and
+    # compatible with typespec in function signature
+    input_prompt=final_answer if type(final_answer) is str else str(final_answer)
+  )
+
