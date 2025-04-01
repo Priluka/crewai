@@ -15,11 +15,11 @@ class ToolsHandler:
     cache: Optional[CacheHandler]
     send_to_socket: Callable
 
-    def __init__(self,  socket_write_fn: Callable, cache: Optional[CacheHandler] = None):
+    def __init__(self,  socket_io: Optional[AgentCloudSocketIO] = None, cache: Optional[CacheHandler] = None):
         """Initialize the callback handler."""
         self.cache = cache
         self.last_used_tool: Union[ToolCalling, dict] = {}
-        self.socket_io = socket_write_fn
+        self.socket_io = socket_io
         self.tool_chunkId = None
 
     def on_tool_use(
