@@ -95,10 +95,10 @@ class CrewAgentExecutorMixin:
                 pass
 
 
-def _ask_human_input(self, final_answer: str) -> str:
-  return self.agent.agentcloud_socket_io.get_human_input(
-    # `final_answer` is usually a string; adding a type-check to be safe and
-    # compatible with typespec in function signature
-    input_prompt=final_answer if type(final_answer) is str else str(final_answer)
-  )
+    def _ask_human_input(self, final_answer: str) -> str:
+      return self.agent.agentcloud_socket_io.get_human_input(
+      # `final_answer` is usually a string; adding a type-check to be safe and
+      # compatible with typespec in function signature
+      input_prompt=final_answer if type(final_answer) is str else str(final_answer)
+    )
 
