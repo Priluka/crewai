@@ -145,7 +145,7 @@ class ToolUsage:
         calling: Union[ToolCalling, InstructorToolCalling],
     ) -> str:  # TODO: Fix this return type
         self.tools_handler.on_tool_start(calling.tool_name)
-        tool_event = agentops.ToolEvent(name=calling.tool_name) if agentops else None  # type: ignore
+        #tool_event = agentops.ToolEvent(name=calling.tool_name) if agentops else None  # type: ignore
         if self._check_tool_repeated_usage(calling=calling):  # type: ignore # _check_tool_repeated_usage of "ToolUsage" does not return a value (it only ever returns None)
             try:
                 result = self._i18n.errors("task_repeated_usage").format(
