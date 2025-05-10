@@ -6,7 +6,17 @@ import warnings
 from concurrent.futures import Future
 from copy import copy as shallow_copy
 from hashlib import md5
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 from pydantic import (
     UUID4,
@@ -27,10 +37,12 @@ from crewai.agentcloud.socket_io import AgentCloudSocketIO
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.cache import CacheHandler
 from crewai.crews.crew_output import CrewOutput
+from crewai.flow.flow_trackable import FlowTrackable
 from crewai.knowledge.knowledge import Knowledge
 from crewai.knowledge.source.base_knowledge_source import BaseKnowledgeSource
 from crewai.llm import LLM, BaseLLM
 from crewai.memory.entity.entity_memory import EntityMemory
+from crewai.memory.external.external_memory import ExternalMemory
 from crewai.memory.long_term.long_term_memory import LongTermMemory
 from crewai.memory.short_term.short_term_memory import ShortTermMemory
 from crewai.memory.user.user_memory import UserMemory
@@ -71,7 +83,7 @@ from crewai.utilities.training_handler import CrewTrainingHandler
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
 
 
-class Crew(BaseModel):
+class Crew(FlowTrackable, BaseModel):
     """
     Represents a group of agents, defining how they should collaborate and the tasks they should perform.
 
@@ -110,6 +122,7 @@ class Crew(BaseModel):
     _long_term_memory: Optional[InstanceOf[LongTermMemory]] = PrivateAttr()
     _entity_memory: Optional[InstanceOf[EntityMemory]] = PrivateAttr()
     _user_memory: Optional[InstanceOf[UserMemory]] = PrivateAttr()
+    _external_memory: Optional[InstanceOf[ExternalMemory]] = PrivateAttr()
     _train: Optional[bool] = PrivateAttr(default=False)
     _train_iteration: Optional[int] = PrivateAttr()
     _inputs: Optional[Dict[str, Any]] = PrivateAttr(default=None)
@@ -149,6 +162,10 @@ class Crew(BaseModel):
     user_memory: Optional[InstanceOf[UserMemory]] = Field(
         default=None,
         description="An instance of the UserMemory to be used by the Crew to store/fetch memories of a specific user.",
+    )
+    external_memory: Optional[InstanceOf[ExternalMemory]] = Field(
+        default=None,
+        description="An Instance of the ExternalMemory to be used by the Crew",
     )
     embedder: Optional[dict] = Field(
         default=None,
@@ -289,40 +306,51 @@ class Crew(BaseModel):
 
         return self
 
+    def _initialize_user_memory(self):
+        if (
+            self.memory_config
+            and "user_memory" in self.memory_config
+            and self.memory_config.get("provider") == "mem0"
+        ):  # Check for user_memory in config
+            user_memory_config = self.memory_config["user_memory"]
+            if isinstance(
+                user_memory_config, dict
+            ):  # Check if it's a configuration dict
+                self._user_memory = UserMemory(crew=self)
+            else:
+                raise TypeError("user_memory must be a configuration dictionary")
+
+    def _initialize_default_memories(self):
+        self._long_term_memory = self._long_term_memory or LongTermMemory()
+        self._short_term_memory = self._short_term_memory or ShortTermMemory(
+            crew=self,
+            embedder_config=self.embedder,
+        )
+        self._entity_memory = self.entity_memory or EntityMemory(
+            crew=self, embedder_config=self.embedder
+        )
+
     @model_validator(mode="after")
     def create_crew_memory(self) -> "Crew":
-        """Set private attributes."""
+        """Initialize private memory attributes."""
+        self._external_memory = (
+            # External memory doesn’t support a default value since it was designed to be managed entirely externally
+            self.external_memory.set_crew(self)
+            if self.external_memory
+            else None
+        )
+
+        self._long_term_memory = self.long_term_memory
+        self._short_term_memory = self.short_term_memory
+        self._entity_memory = self.entity_memory
+
+        # UserMemory is gonna to be deprecated in the future, but we have to initialize a default value for now
+        self._user_memory = None
+
         if self.memory:
-            self._long_term_memory = (
-                self.long_term_memory if self.long_term_memory else LongTermMemory()
-            )
-            self._short_term_memory = (
-                self.short_term_memory
-                if self.short_term_memory
-                else ShortTermMemory(
-                    crew=self,
-                    embedder_config=self.embedder,
-                )
-            )
-            self._entity_memory = (
-                self.entity_memory
-                if self.entity_memory
-                else EntityMemory(crew=self, embedder_config=self.embedder)
-            )
-            if (
-                self.memory_config
-                and "user_memory" in self.memory_config
-                and self.memory_config.get("provider") == "mem0"
-            ):  # Check for user_memory in config
-                user_memory_config = self.memory_config["user_memory"]
-                if isinstance(
-                    user_memory_config, dict
-                ):  # Check if it's a configuration dict
-                    self._user_memory = UserMemory(crew=self)
-                else:
-                    raise TypeError("user_memory must be a configuration dictionary")
-            else:
-                self._user_memory = None  # No user memory if not in config
+            self._initialize_default_memories()
+            self._initialize_user_memory()
+
         return self
 
     @model_validator(mode="after")
@@ -338,6 +366,7 @@ class Crew(BaseModel):
                         embedder=self.embedder,
                         collection_name="crew",
                     )
+                    self.knowledge.add_sources()
 
             except Exception as e:
                 self._logger.log(
@@ -1153,9 +1182,13 @@ class Crew(BaseModel):
         result = self._execute_tasks(self.tasks, start_index, True)
         return result
 
-    def query_knowledge(self, query: List[str]) -> Union[List[Dict[str, Any]], None]:
+    def query_knowledge(
+        self, query: List[str], results_limit: int = 3, score_threshold: float = 0.35
+    ) -> Union[List[Dict[str, Any]], None]:
         if self.knowledge:
-            return self.knowledge.query(query)
+            return self.knowledge.query(
+                query, results_limit=results_limit, score_threshold=score_threshold
+            )
         return None
 
     def fetch_inputs(self) -> Set[str]:
@@ -1201,6 +1234,7 @@ class Crew(BaseModel):
             "_short_term_memory",
             "_long_term_memory",
             "_entity_memory",
+            "_external_memory",
             "_telemetry",
             "agents",
             "tasks",
@@ -1235,6 +1269,20 @@ class Crew(BaseModel):
 
         copied_data = self.model_dump(exclude=exclude)
         copied_data = {k: v for k, v in copied_data.items() if v is not None}
+        if self.short_term_memory:
+            copied_data["short_term_memory"] = self.short_term_memory.model_copy(
+                deep=True
+            )
+        if self.long_term_memory:
+            copied_data["long_term_memory"] = self.long_term_memory.model_copy(
+                deep=True
+            )
+        if self.entity_memory:
+            copied_data["entity_memory"] = self.entity_memory.model_copy(deep=True)
+        if self.external_memory:
+            copied_data["external_memory"] = self.external_memory.model_copy(deep=True)
+        if self.user_memory:
+            copied_data["user_memory"] = self.user_memory.model_copy(deep=True)
 
         copied_data.pop("agents", None)
         copied_data.pop("tasks", None)
@@ -1351,7 +1399,15 @@ class Crew(BaseModel):
             RuntimeError: If memory reset operation fails.
         """
         VALID_TYPES = frozenset(
-            ["long", "short", "entity", "knowledge", "kickoff_outputs", "all"]
+            [
+                "long",
+                "short",
+                "entity",
+                "knowledge",
+                "kickoff_outputs",
+                "all",
+                "external",
+            ]
         )
 
         if command_type not in VALID_TYPES:
@@ -1365,8 +1421,6 @@ class Crew(BaseModel):
             else:
                 self._reset_specific_memory(command_type)
 
-            self._logger.log("info", f"{command_type} memory has been reset")
-
         except Exception as e:
             error_msg = f"Failed to reset {command_type} memory: {str(e)}"
             self._logger.log("error", error_msg)
@@ -1377,6 +1431,7 @@ class Crew(BaseModel):
         memory_systems = [
             ("short term", getattr(self, "_short_term_memory", None)),
             ("entity", getattr(self, "_entity_memory", None)),
+            ("external", getattr(self, "_external_memory", None)),
             ("long term", getattr(self, "_long_term_memory", None)),
             ("task output", getattr(self, "_task_output_handler", None)),
             ("knowledge", getattr(self, "knowledge", None)),
@@ -1386,8 +1441,14 @@ class Crew(BaseModel):
             if system is not None:
                 try:
                     system.reset()
+                    self._logger.log(
+                        "info",
+                        f"[Crew ({self.name if self.name else self.id})] {name} memory has been reset",
+                    )
                 except Exception as e:
-                    raise RuntimeError(f"Failed to reset {name} memory") from e
+                    raise RuntimeError(
+                        f"[Crew ({self.name if self.name else self.id})] Failed to reset {name} memory: {str(e)}"
+                    ) from e
 
     def _reset_specific_memory(self, memory_type: str) -> None:
         """Reset a specific memory system.
@@ -1399,11 +1460,15 @@ class Crew(BaseModel):
             RuntimeError: If the specified memory system fails to reset
         """
         reset_functions = {
-            "long": (self._long_term_memory, "long term"),
-            "short": (self._short_term_memory, "short term"),
-            "entity": (self._entity_memory, "entity"),
-            "knowledge": (self.knowledge, "knowledge"),
-            "kickoff_outputs": (self._task_output_handler, "task output"),
+            "long": (getattr(self, "_long_term_memory", None), "long term"),
+            "short": (getattr(self, "_short_term_memory", None), "short term"),
+            "entity": (getattr(self, "_entity_memory", None), "entity"),
+            "knowledge": (getattr(self, "knowledge", None), "knowledge"),
+            "kickoff_outputs": (
+                getattr(self, "_task_output_handler", None),
+                "task output",
+            ),
+            "external": (getattr(self, "_external_memory", None), "external"),
         }
 
         memory_system, name = reset_functions[memory_type]
@@ -1412,5 +1477,11 @@ class Crew(BaseModel):
 
         try:
             memory_system.reset()
+            self._logger.log(
+                "info",
+                f"[Crew ({self.name if self.name else self.id})] {name} memory has been reset",
+            )
         except Exception as e:
-            raise RuntimeError(f"Failed to reset {name} memory") from e
+            raise RuntimeError(
+                f"[Crew ({self.name if self.name else self.id})] Failed to reset {name} memory: {str(e)}"
+            ) from e
