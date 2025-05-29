@@ -149,7 +149,7 @@ class ToolUsage:
         tool: CrewStructuredTool,
         calling: Union[ToolCalling, InstructorToolCalling],
     ) -> str:  # TODO: Fix this return type
-        self.tools_handler.on_tool_start(calling.tool_name)
+       # self.tools_handler.on_tool_start(calling.tool_name)
         if self._check_tool_repeated_usage(calling=calling):  # type: ignore # _check_tool_repeated_usage of "ToolUsage" does not return a value (it only ever returns None)
             try:
                 result = self._i18n.errors("task_repeated_usage").format(
@@ -354,20 +354,20 @@ class ToolUsage:
                 calling.arguments == last_tool_usage.arguments
             )
         return False
-        
+
     def _check_usage_limit(self, tool: Any, tool_name: str) -> str | None:
         """Check if tool has reached its usage limit.
-        
+
         Args:
             tool: The tool to check
             tool_name: The name of the tool (used for error message)
-            
+
         Returns:
             Error message if limit reached, None otherwise
         """
         if (
-            hasattr(tool, 'max_usage_count') 
-            and tool.max_usage_count is not None 
+            hasattr(tool, 'max_usage_count')
+            and tool.max_usage_count is not None
             and tool.current_usage_count >= tool.max_usage_count
         ):
             return f"Tool '{tool_name}' has reached its usage limit of {tool.max_usage_count} times and cannot be used anymore."

@@ -37,16 +37,16 @@ class ToolsHandler:
                 output=output,
             )
 
-    def on_tool_start(self, tool_name: str):
-      self.tool_chunkId = str(uuid.uuid4())
-      self.socket_io.send_to_socket(
-        text=f"Using tool: {tool_name.capitalize()}",
-        event="message",
-        first=True,
-        chunk_id=self.tool_chunkId,
-        timestamp=datetime.now().timestamp() * 1000,
-        display_type="inline"
-      )
+remo    # def on_tool_start(self, tool_name: str):
+    #   self.tool_chunkId = str(uuid.uuid4())
+    #   self.socket_io.send_to_socket(
+    #     text=f"Using tool: {tool_name.capitalize()}",
+    #     event="message",
+    #     first=True,
+    #     chunk_id=self.tool_chunkId,
+    #     timestamp=datetime.now().timestamp() * 1000,
+    #     display_type="inline"
+    #   )
 
     def on_tool_end(self, tool_name: str):
       self.socket_io.send_to_socket(
