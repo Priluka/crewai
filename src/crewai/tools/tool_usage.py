@@ -313,7 +313,7 @@ class ToolUsage:
 
         if self.agent and hasattr(self.agent, "tools_results"):
             self.agent.tools_results.append(data)
-            self.tools_handler.on_tool_end(calling.tool_name)
+            #self.tools_handler.on_tool_end(calling.tool_name)
 
         if available_tool and hasattr(available_tool, 'current_usage_count'):
             available_tool.current_usage_count += 1

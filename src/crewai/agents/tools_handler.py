@@ -48,16 +48,16 @@ class ToolsHandler:
     #     display_type="inline"
     #   )
 
-    def on_tool_end(self, tool_name: str):
-      self.socket_io.send_to_socket(
-        text=f"Finished using tool: {tool_name.capitalize()}",
-        event="message",
-        first=True,
-        chunk_id=self.tool_chunkId,
-        timestamp=datetime.now().timestamp() * 1000,
-        display_type="inline",
-        overwrite=True
-      )
+    # def on_tool_end(self, tool_name: str):
+    #   self.socket_io.send_to_socket(
+    #     text=f"Finished using tool: {tool_name.capitalize()}",
+    #     event="message",
+    #     first=True,
+    #     chunk_id=self.tool_chunkId,
+    #     timestamp=datetime.now().timestamp() * 1000,
+    #     display_type="inline",
+    #     overwrite=True
+    #   )
 
     def on_tool_error(self, error_msg: str):
       self.socket_io.send_to_socket(
