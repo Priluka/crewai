@@ -263,8 +263,6 @@ class ToolUsage:
                         self._printer.print(
                             content=f"\n\n{error_message}\n", color="red"
                         )
-                        self.tools_handler.on_tool_error(error_message)
-                    self.tools_handler.on_tool_error(error_message)
                     return error  # type: ignore # No return value expected
 
                 if self.task:
