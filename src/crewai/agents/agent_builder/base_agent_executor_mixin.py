@@ -7,6 +7,7 @@ from crewai.utilities import I18N
 from crewai.utilities.converter import ConverterError
 from crewai.utilities.evaluators.task_evaluator import TaskEvaluator
 from crewai.utilities.printer import Printer
+from crewai.utilities.events.event_listener import event_listener
 
 if TYPE_CHECKING:
     from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -126,8 +127,7 @@ class CrewAgentExecutorMixin:
 
     def _ask_human_input(self, final_answer: str) -> str:
       return self.agent.agentcloud_socket_io.get_human_input(
-      # `final_answer` is usually a string; adding a type-check to be safe and
-      # compatible with typespec in function signature
-      input_prompt=final_answer if type(final_answer) is str else str(final_answer)
-    )
-
+        # `final_answer` is usually a string; adding a type-check to be safe and
+        # compatible with typespec in function signature
+        input_prompt=final_answer if type(final_answer) is str else str(final_answer)
+      )
