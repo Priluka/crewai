@@ -126,8 +126,48 @@ class CrewAgentExecutorMixin:
 
 
     def _ask_human_input(self, final_answer: str) -> str:
-      return self.agent.agentcloud_socket_io.get_human_input(
-        # `final_answer` is usually a string; adding a type-check to be safe and
-        # compatible with typespec in function signature
-        input_prompt=final_answer if type(final_answer) is str else str(final_answer)
-      )
+      """Prompt human input with mode-appropriate messaging."""
+      event_listener.formatter.pause_live_updates()
+
+      try:
+        # Display the final answer to the user first
+        self._printer.print(
+          content=f"\033[1m\033[95m ## Final Result:\033[00m \033[92m{final_answer}\033[00m"
+        )
+
+        # Determine the appropriate prompt based on mode
+        if self.crew and getattr(self.crew, "_train", False):
+          prompt = (
+            "\n\n=====\n"
+            "## TRAINING MODE: Provide feedback to improve the agent's performance.\n"
+            "This will be used to train better versions of the agent.\n"
+            "Please provide detailed feedback about the result quality and reasoning process.\n"
+            "=====\n"
+          )
+        else:
+          prompt = (
+            "\n\n=====\n"
+            "## HUMAN FEEDBACK: Provide feedback on the Final Result and Agent's actions.\n"
+            "Please follow these guidelines:\n"
+            " - If you are happy with the result, simply hit Enter without typing anything.\n"
+            " - Otherwise, provide specific improvement requests.\n"
+            " - You can provide multiple rounds of feedback until satisfied.\n"
+            "=====\n"
+          )
+
+        # Show the prompt to explain what's expected
+        self._printer.print(content=prompt, color="bold_yellow")
+
+        # Get human input via socket method
+        response = self.agent.agentcloud_socket_io.get_human_input(
+          input_prompt=prompt  # Prompt message passed to human interface
+        )
+
+        if response and response.strip() != "":
+          self._printer.print(content="\nProcessing your feedback...", color="cyan")
+
+        return response if response else ""
+
+      finally:
+        event_listener.formatter.resume_live_updates()
+
