@@ -421,7 +421,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
 
         while self.ask_for_human_input:
             # If the user provides a blank response, assume they are happy with the result
-            if feedback.strip() == "":
+            if feedback.strip().lower() in ["", "continue"]:
                 self.ask_for_human_input = False
             else:
                 answer = self._process_feedback_iteration(feedback)
