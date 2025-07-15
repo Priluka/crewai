@@ -831,6 +831,44 @@ class Crew(FlowTrackable, BaseModel):
             self.manager_agent = manager
         manager.crew = self
 
+            # Copy Redis tracking setup from any existing agent
+        # This ensures manager agent tokens are tracked in Redis
+        if self.agents:
+          for agent in self.agents:
+            if all(hasattr(agent, attr) for attr in ['_redis_client', '_session_id']):
+              manager._redis_client = agent._redis_client
+              manager._session_id = agent._session_id
+
+              # Use the manager model_id that was stored during crew creation
+              if hasattr(self, '_manager_model_id'):
+                manager._model_id = self._manager_model_id
+              else:
+                # Fallback: use the agent's model_id but log a warning
+                if hasattr(agent, '_model_id'):
+                  manager._model_id = agent._model_id
+                  self._logger.log(
+                    "warning",
+                    f"No dedicated manager model_id found. Using agent model: {agent._model_id}",
+                    color="yellow"
+                  )
+                else:
+                  manager._model_id = "unknown_manager"
+                  self._logger.log(
+                    "error",
+                    "No model_id available for manager - costs won't be tracked!",
+                    color="red"
+                  )
+
+              redis_setup_done = True
+              break
+
+        if not redis_setup_done:
+          self._logger.log(
+            "error",
+            "Could not set up Redis tracking for manager agent - no agents have Redis info",
+            color="red"
+          )
+
     def _execute_tasks(
         self,
         tasks: List[Task],

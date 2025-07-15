@@ -191,6 +191,14 @@ class LiteAgent(FlowTrackable, BaseModel):
 
         # Initialize callbacks
         token_callback = TokenCalcHandler(token_cost_process=self._token_process)
+
+        if self.original_agent and all(hasattr(self.original_agent, attr) for attr in ['_redis_client', '_session_id', '_model_id']):
+          token_callback.setup_redis_tracking(
+            redis_client=self.original_agent._redis_client,
+            session_id=self.original_agent._session_id,
+            model_id=self.original_agent._model_id
+          )
+
         self._callbacks = [token_callback]
 
         return self

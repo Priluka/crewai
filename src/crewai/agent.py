@@ -566,33 +566,67 @@ class Agent(BaseAgent):
             stream_only_final_output=task.stream_only_final_output
           )
 
-          # Create the callbacks list, filtering out None values
-          # Add non-None handlers to self.callbacks
-        for handler in [TokenCalcHandler(self._token_process), socket_stream_handler]:
-          if handler is not None:
-            self.callbacks.append(handler)
+        # TOKEN HANDLER MANAGEMENT - FIXED SECTION
+        # Check if we already have a TokenCalcHandler
+        existing_token_handler = None
+        existing_token_handler_index = None
 
+        for i, cb in enumerate(self.callbacks):
+          if isinstance(cb, TokenCalcHandler):
+            existing_token_handler = cb
+            existing_token_handler_index = i
+            break
+
+        if existing_token_handler:
+          # If it doesn't have Redis tracking but we now have the required attributes, update it
+          if not existing_token_handler.redis_client and all(hasattr(self, attr) for attr in ['_redis_client', '_session_id', '_model_id']):
+            existing_token_handler.setup_redis_tracking(
+              redis_client=self._redis_client,
+              session_id=self._session_id,
+              model_id=self._model_id
+            )
+        else:
+          # Create new handler only if none exists
+          token_handler = TokenCalcHandler(self._token_process)
+          if all(hasattr(self, attr) for attr in ['_redis_client', '_session_id', '_model_id']):
+            token_handler.setup_redis_tracking(
+              redis_client=self._redis_client,
+              session_id=self._session_id,
+              model_id=self._model_id
+            )
+          self.callbacks.append(token_handler)
+
+        # SOCKET HANDLER MANAGEMENT - Only add if task is provided
+        if socket_stream_handler is not None:
+          # Remove any existing SocketStreamHandler to avoid duplicates
+          self.callbacks = [
+            cb for cb in self.callbacks
+            if not isinstance(cb, SocketStreamHandler)
+          ]
+          self.callbacks.append(socket_stream_handler)
+
+        # Create the agent executor
         self.agent_executor = CrewAgentExecutor(
-            llm=self.llm,
-            task=task,
-            agent=self,
-            crew=self.crew,
-            tools=parsed_tools,
-            prompt=prompt,
-            original_tools=raw_tools,
-            stop_words=stop_words,
-            max_iter=self.max_iter,
-            tools_handler=self.tools_handler,
-            tools_names=get_tool_names(parsed_tools),
-            tools_description=render_text_description_and_args(parsed_tools),
-            step_callback=self.step_callback,
-            function_calling_llm=self.function_calling_llm,
-            stop_generating_check=self.stop_generating_check,
-            respect_context_window=self.respect_context_window,
-            request_within_rpm_limit=(
-                self._rpm_controller.check_or_wait if self._rpm_controller else None
-            ),
-            callbacks=self.callbacks,
+          llm=self.llm,
+          task=task,
+          agent=self,
+          crew=self.crew,
+          tools=parsed_tools,
+          prompt=prompt,
+          original_tools=raw_tools,
+          stop_words=stop_words,
+          max_iter=self.max_iter,
+          tools_handler=self.tools_handler,
+          tools_names=get_tool_names(parsed_tools),
+          tools_description=render_text_description_and_args(parsed_tools),
+          step_callback=self.step_callback,
+          function_calling_llm=self.function_calling_llm,
+          stop_generating_check=self.stop_generating_check,
+          respect_context_window=self.respect_context_window,
+          request_within_rpm_limit=(
+            self._rpm_controller.check_or_wait if self._rpm_controller else None
+          ),
+          callbacks=self.callbacks,
         )
 
     def get_delegation_tools(self, agents: List[BaseAgent]):
