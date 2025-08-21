@@ -95,34 +95,37 @@ class AgentCloudSocketIO:
         )
 
     def get_human_input(self, input_prompt: str, author_name='System'):
-        try:
-            self.send(
-                self.socket,
-                SocketEvents.MESSAGE,
-                SocketMessage(
-                    room=self.session_id,
-                    authorName=author_name,
-                    message=Message(
-                        chunkId=str(uuid4()),
-                        text="",
-                        first=True,
-                        tokens=1,  # Assumes 1 token is a constant value for message segmentation.
-                        timestamp=datetime.now().timestamp() * 1000,
-                        single=True,
-                    ),
-                    isFeedback=True,
-                ),
-                "socket"
-            )
-            feedback = self.socket.receive()
-            return feedback[1]
-        except TimeoutError:
-            self.socket.emit(
-                "message",
-                {
-                    "room": self.session_id,
-                    "type": "error",
-                    "message": "TimeOutError"
-                },
-            )
-            return "exit"
+      try:
+        self.send(
+          self.socket,
+          SocketEvents.MESSAGE,
+          SocketMessage(
+            room=self.session_id,
+            authorName=author_name,
+            message=Message(
+              chunkId=str(uuid4()),
+              text="",
+              first=True,
+              tokens=1,
+              timestamp=datetime.now().timestamp() * 1000,
+              single=True,
+            ),
+            isFeedback=True,
+          ),
+          "socket"
+        )
+
+        feedback = self.socket.receive(timeout=300.0)  # 300 minutes
+        return feedback[1] if feedback else ""
+
+      except Exception as e:
+        # Check if it's a timeout (by exception type name or message)
+        if type(e).__name__ == "TimeoutError" or "timeout" in str(e).lower():
+          return ""  # Continue on timeout
+        else:
+          # Real error - not a timeout
+          self.socket.emit(
+            "message",
+            {"room": self.session_id, "type": "error", "message": str(e)},
+          )
+          return "exit"

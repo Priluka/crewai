@@ -129,6 +129,9 @@ class CrewAgentExecutorMixin:
       """Prompt human input with mode-appropriate messaging."""
       event_listener.formatter.pause_live_updates()
 
+      # Track wait start time
+      wait_start = time.perf_counter()
+
       try:
         # Display the final answer to the user first
         self._printer.print(
@@ -169,5 +172,13 @@ class CrewAgentExecutorMixin:
         return response if response else ""
 
       finally:
+        # Calculate wait time
+        wait_end = time.perf_counter()
+        wait_duration = min(wait_end - wait_start, 300)  # Cap at 5 min (300 seconds)
+        # Store wait time on crew
+        if hasattr(self, 'crew') and self.crew:
+          if not hasattr(self.crew, '_human_wait_time'):
+            self.crew._human_wait_time = 0
+          self.crew._human_wait_time += wait_duration  # THIS LINE IS NOW CORRECTLY INDENTED
         event_listener.formatter.resume_live_updates()
 
