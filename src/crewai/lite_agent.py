@@ -1,14 +1,35 @@
 import asyncio
 import inspect
 import uuid
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union, cast, get_args, get_origin
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+)
+
 
 try:
     from typing import Self
 except ImportError:
     from typing_extensions import Self
 
-from pydantic import BaseModel, Field, InstanceOf, PrivateAttr, model_validator, field_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    Field,
+    InstanceOf,
+    PrivateAttr,
+    model_validator,
+    field_validator,
+)
 
 from crewai.agents.agent_builder.base_agent import BaseAgent
 from crewai.agents.agent_builder.utilities.base_token_process import TokenProcess
@@ -19,7 +40,7 @@ from crewai.agents.parser import (
     OutputParserException,
 )
 from crewai.flow.flow_trackable import FlowTrackable
-from crewai.llm import LLM
+from crewai.llm import LLM, BaseLLM
 from crewai.tools.base_tool import BaseTool
 from crewai.tools.structured_tool import CrewStructuredTool
 from crewai.utilities import I18N
@@ -39,10 +60,10 @@ from crewai.utilities.agent_utils import (
     parse_tools,
     process_llm_response,
     render_text_description_and_args,
-    show_agent_logs,
 )
 from crewai.utilities.converter import generate_model_description
 from crewai.utilities.events.agent_events import (
+    AgentLogsExecutionEvent,
     LiteAgentExecutionCompletedEvent,
     LiteAgentExecutionErrorEvent,
     LiteAgentExecutionStartedEvent,
@@ -110,10 +131,11 @@ class LiteAgent(FlowTrackable, BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     # Core Agent Properties
+    id: UUID4 = Field(default_factory=uuid.uuid4, frozen=True)
     role: str = Field(description="Role of the agent")
     goal: str = Field(description="Goal of the agent")
     backstory: str = Field(description="Backstory of the agent")
-    llm: Optional[Union[str, InstanceOf[LLM], Any]] = Field(
+    llm: Optional[Union[str, InstanceOf[BaseLLM], Any]] = Field(
         default=None, description="Language model that will run the agent"
     )
     tools: List[BaseTool] = Field(
@@ -125,7 +147,7 @@ class LiteAgent(FlowTrackable, BaseModel):
         default=15, description="Maximum number of iterations for tool usage"
     )
     max_execution_time: Optional[int] = Field(
-        default=None, description="Maximum execution time in seconds"
+        default=None, description=". Maximum execution time in seconds"
     )
     respect_context_window: bool = Field(
         default=True,
@@ -153,9 +175,11 @@ class LiteAgent(FlowTrackable, BaseModel):
     )
 
     # Guardrail Properties
-    guardrail: Optional[Union[Callable[[LiteAgentOutput], Tuple[bool, Any]], str]] = Field(
-        default=None,
-        description="Function or string description of a guardrail to validate agent output"
+    guardrail: Optional[Union[Callable[[LiteAgentOutput], Tuple[bool, Any]], str]] = (
+        Field(
+            default=None,
+            description="Function or string description of a guardrail to validate agent output",
+        )
     )
     guardrail_max_retries: int = Field(
         default=3, description="Maximum number of retries when guardrail fails"
@@ -181,13 +205,14 @@ class LiteAgent(FlowTrackable, BaseModel):
     _guardrail: Optional[Callable] = PrivateAttr(default=None)
     _guardrail_retry_count: int = PrivateAttr(default=0)
 
-
     @model_validator(mode="after")
     def setup_llm(self):
         """Set up the LLM and other components after initialization."""
         self.llm = create_llm(self.llm)
-        if not isinstance(self.llm, LLM):
-            raise ValueError("Unable to create LLM instance")
+        if not isinstance(self.llm, BaseLLM):
+            raise ValueError(
+                f"Expected LLM instance of type BaseLLM, got {type(self.llm).__name__}"
+            )
 
         # Initialize callbacks
         token_callback = TokenCalcHandler(token_cost_process=self._token_process)
@@ -216,17 +241,21 @@ class LiteAgent(FlowTrackable, BaseModel):
             self._guardrail = self.guardrail
         elif isinstance(self.guardrail, str):
             from crewai.tasks.llm_guardrail import LLMGuardrail
-            assert isinstance(self.llm, LLM)
 
-            self._guardrail = LLMGuardrail(
-                description=self.guardrail, llm=self.llm
-            )
+            if not isinstance(self.llm, BaseLLM):
+                raise TypeError(
+                    f"Guardrail requires LLM instance of type BaseLLM, got {type(self.llm).__name__}"
+                )
+
+            self._guardrail = LLMGuardrail(description=self.guardrail, llm=self.llm)
 
         return self
 
     @field_validator("guardrail", mode="before")
     @classmethod
-    def validate_guardrail_function(cls, v: Optional[Union[Callable, str]]) -> Optional[Union[Callable, str]]:
+    def validate_guardrail_function(
+        cls, v: Optional[Union[Callable, str]]
+    ) -> Optional[Union[Callable, str]]:
         """Validate that the guardrail function has the correct signature.
 
         If v is a callable, validate that it has the correct signature.
@@ -288,6 +317,7 @@ class LiteAgent(FlowTrackable, BaseModel):
         """
         # Create agent info for event emission
         agent_info = {
+            "id": self.id,
             "role": self.role,
             "goal": self.goal,
             "backstory": self.backstory,
@@ -338,9 +368,7 @@ class LiteAgent(FlowTrackable, BaseModel):
         if self.response_format:
             try:
                 # Cast to BaseModel to ensure type safety
-                result = self.response_format.model_validate_json(
-                    agent_finish.output
-                )
+                result = self.response_format.model_validate_json(agent_finish.output)
                 if isinstance(result, BaseModel):
                     formatted_result = result
             except Exception as e:
@@ -365,15 +393,15 @@ class LiteAgent(FlowTrackable, BaseModel):
             guardrail_result = process_guardrail(
                 output=output,
                 guardrail=self._guardrail,
-                retry_count=self._guardrail_retry_count
+                retry_count=self._guardrail_retry_count,
             )
 
             if not guardrail_result.success:
                 if self._guardrail_retry_count >= self.guardrail_max_retries:
-                        raise Exception(
-                            f"Agent's guardrail failed validation after {self.guardrail_max_retries} retries. "
-                            f"Last error: {guardrail_result.error}"
-                        )
+                    raise Exception(
+                        f"Agent's guardrail failed validation after {self.guardrail_max_retries} retries. "
+                        f"Last error: {guardrail_result.error}"
+                    )
                 self._guardrail_retry_count += 1
                 if self.verbose:
                     self._printer.print(
@@ -381,10 +409,13 @@ class LiteAgent(FlowTrackable, BaseModel):
                         f"\n{guardrail_result.error}"
                     )
 
-                self._messages.append({
-                    "role": "user",
-                    "content": guardrail_result.error or "Guardrail validation failed"
-                })
+                self._messages.append(
+                    {
+                        "role": "user",
+                        "content": guardrail_result.error
+                        or "Guardrail validation failed",
+                    }
+                )
 
                 return self._execute_core(agent_info=agent_info)
 
@@ -496,13 +527,16 @@ class LiteAgent(FlowTrackable, BaseModel):
 
                 enforce_rpm_limit(self.request_within_rpm_limit)
 
-                # Emit LLM call started event
+                llm = cast(LLM, self.llm)
+                model = llm.model if hasattr(llm, "model") else "unknown"
                 crewai_event_bus.emit(
                     self,
                     event=LLMCallStartedEvent(
                         messages=self._messages,
                         tools=None,
                         callbacks=self._callbacks,
+                        from_agent=self,
+                        model=model,
                     ),
                 )
 
@@ -512,21 +546,25 @@ class LiteAgent(FlowTrackable, BaseModel):
                         messages=self._messages,
                         callbacks=self._callbacks,
                         printer=self._printer,
+                        from_agent=self,
                     )
 
                     # Emit LLM call completed event
                     crewai_event_bus.emit(
                         self,
                         event=LLMCallCompletedEvent(
+                            messages=self._messages,
                             response=answer,
                             call_type=LLMCallType.LLM_CALL,
+                            from_agent=self,
+                            model=model,
                         ),
                     )
                 except Exception as e:
                     # Emit LLM call failed event
                     crewai_event_bus.emit(
                         self,
-                        event=LLMCallFailedEvent(error=str(e)),
+                        event=LLMCallFailedEvent(error=str(e), from_agent=self),
                     )
                     raise e
 
@@ -588,11 +626,13 @@ class LiteAgent(FlowTrackable, BaseModel):
 
     def _show_logs(self, formatted_answer: Union[AgentAction, AgentFinish]):
         """Show logs for the agent's execution."""
-        show_agent_logs(
-            printer=self._printer,
-            agent_role=self.role,
-            formatted_answer=formatted_answer,
-            verbose=self.verbose,
+        crewai_event_bus.emit(
+            self,
+            AgentLogsExecutionEvent(
+                agent_role=self.role,
+                formatted_answer=formatted_answer,
+                verbose=self.verbose,
+            ),
         )
 
     def _append_message(self, text: str, role: str = "assistant") -> None:

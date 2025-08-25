@@ -1,5 +1,4 @@
 from datetime import datetime
-import uuid
 from typing import Any, Optional, Union, Callable
 
 from ..agentcloud.socket_io import AgentCloudSocketIO
@@ -11,14 +10,14 @@ from .cache.cache_handler import CacheHandler
 class ToolsHandler:
     """Callback handler for tool usage."""
 
-    last_used_tool: ToolCalling = {}  # type: ignore # BUG?: Incompatible types in assignment (expression has type "Dict[...]", variable has type "ToolCalling")
+    last_used_tool: Optional[ToolCalling] = None
     cache: Optional[CacheHandler]
     send_to_socket: Callable
 
     def __init__(self,  socket_io: Optional[AgentCloudSocketIO] = None, cache: Optional[CacheHandler] = None):
         """Initialize the callback handler."""
         self.cache = cache
-        self.last_used_tool: Union[ToolCalling, dict] = {}
+        self.last_used_tool = None
         self.socket_io = socket_io
         self.tool_chunkId = None
 
