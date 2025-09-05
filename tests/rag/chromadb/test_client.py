@@ -27,18 +27,20 @@ def mock_async_chromadb_client():
 @pytest.fixture
 def client(mock_chromadb_client) -> ChromaDBClient:
     """Create a ChromaDBClient instance for testing."""
-    client = ChromaDBClient()
-    client.client = mock_chromadb_client
-    client.embedding_function = Mock()
+    mock_embedding = Mock()
+    client = ChromaDBClient(
+        client=mock_chromadb_client, embedding_function=mock_embedding
+    )
     return client
 
 
 @pytest.fixture
 def async_client(mock_async_chromadb_client) -> ChromaDBClient:
     """Create a ChromaDBClient instance with async client for testing."""
-    client = ChromaDBClient()
-    client.client = mock_async_chromadb_client
-    client.embedding_function = Mock()
+    mock_embedding = Mock()
+    client = ChromaDBClient(
+        client=mock_async_chromadb_client, embedding_function=mock_embedding
+    )
     return client
 
 
@@ -251,8 +253,8 @@ class TestChromaDBClient:
         )
 
         # Verify documents were added to collection
-        mock_collection.add.assert_called_once()
-        call_args = mock_collection.add.call_args
+        mock_collection.upsert.assert_called_once()
+        call_args = mock_collection.upsert.call_args
         assert len(call_args.kwargs["ids"]) == 1
         assert call_args.kwargs["documents"] == ["Test document"]
         assert call_args.kwargs["metadatas"] == [{"source": "test"}]
@@ -277,7 +279,7 @@ class TestChromaDBClient:
 
         client.add_documents(collection_name="test_collection", documents=documents)
 
-        mock_collection.add.assert_called_once_with(
+        mock_collection.upsert.assert_called_once_with(
             ids=["custom_id_1", "custom_id_2"],
             documents=["First document", "Second document"],
             metadatas=[{"source": "test1"}, {"source": "test2"}],
@@ -317,8 +319,8 @@ class TestChromaDBClient:
         )
 
         # Verify documents were added to collection
-        mock_collection.add.assert_called_once()
-        call_args = mock_collection.add.call_args
+        mock_collection.upsert.assert_called_once()
+        call_args = mock_collection.upsert.call_args
         assert len(call_args.kwargs["ids"]) == 1
         assert call_args.kwargs["documents"] == ["Test document"]
         assert call_args.kwargs["metadatas"] == [{"source": "test"}]
@@ -350,7 +352,7 @@ class TestChromaDBClient:
             collection_name="test_collection", documents=documents
         )
 
-        mock_collection.add.assert_called_once_with(
+        mock_collection.upsert.assert_called_once_with(
             ids=["custom_id_1", "custom_id_2"],
             documents=["First document", "Second document"],
             metadatas=[{"source": "test1"}, {"source": "test2"}],

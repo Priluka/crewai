@@ -7,7 +7,7 @@ from crewai.utilities import I18N
 from crewai.utilities.converter import ConverterError
 from crewai.utilities.evaluators.task_evaluator import TaskEvaluator
 from crewai.utilities.printer import Printer
-from crewai.utilities.events.event_listener import event_listener
+from crewai.events.event_listener import event_listener
 
 if TYPE_CHECKING:
     from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -43,7 +43,6 @@ class CrewAgentExecutorMixin:
                         metadata={
                             "observation": self.task.description,
                         },
-                        agent=self.agent.role,
                     )
             except Exception as e:
                 print(f"Failed to add to short term memory: {e}")
@@ -65,7 +64,6 @@ class CrewAgentExecutorMixin:
                         "description": self.task.description,
                         "messages": self.messages,
                     },
-                    agent=self.agent.role,
                 )
             except Exception as e:
                 print(f"Failed to add to external memory: {e}")
@@ -100,8 +98,8 @@ class CrewAgentExecutorMixin:
                 )
                 self.crew._long_term_memory.save(long_term_memory)
 
-                for entity in evaluation.entities:
-                    entity_memory = EntityMemoryItem(
+                entity_memories = [
+                    EntityMemoryItem(
                         name=entity.name,
                         type=entity.type,
                         description=entity.description,
@@ -109,7 +107,10 @@ class CrewAgentExecutorMixin:
                             [f"- {r}" for r in entity.relationships]
                         ),
                     )
-                    self.crew._entity_memory.save(entity_memory)
+                    for entity in evaluation.entities
+                ]
+                if entity_memories:
+                    self.crew._entity_memory.save(entity_memories)
             except AttributeError as e:
                 print(f"Missing attributes for long term memory: {e}")
                 pass
@@ -126,7 +127,6 @@ class CrewAgentExecutorMixin:
                 color="bold_yellow",
             )
 
-
     def _ask_human_input(self, final_answer: str) -> str:
       """Prompt human input with mode-appropriate messaging."""
       event_listener.formatter.pause_live_updates()
@@ -140,7 +140,7 @@ class CrewAgentExecutorMixin:
           content=f"\033[1m\033[95m ## Final Result:\033[00m \033[92m{final_answer}\033[00m"
         )
 
-        # Determine the appropriate prompt based on mode
+        # Training mode prompt (single iteration)
         if self.crew and getattr(self.crew, "_train", False):
           prompt = (
             "\n\n=====\n"
@@ -149,6 +149,7 @@ class CrewAgentExecutorMixin:
             "Please provide detailed feedback about the result quality and reasoning process.\n"
             "=====\n"
           )
+        # Regular human-in-the-loop prompt (multiple iterations)
         else:
           prompt = (
             "\n\n=====\n"

@@ -20,8 +20,8 @@ from crewai.utilities.agent_utils import (
     get_tool_names,
     render_text_description_and_args,
 )
-from crewai.utilities.events.crewai_event_bus import crewai_event_bus
-from crewai.utilities.events.tool_usage_events import (
+from crewai.events.event_bus import crewai_event_bus
+from crewai.events.types.tool_usage_events import (
     ToolSelectionErrorEvent,
     ToolUsageErrorEvent,
     ToolUsageFinishedEvent,
@@ -179,8 +179,10 @@ class ToolUsage:
 
             if self.agent.fingerprint:
                 event_data.update(self.agent.fingerprint)
-
-            crewai_event_bus.emit(self,ToolUsageStartedEvent(**event_data))
+            if self.task:
+              event_data["task_name"] = self.task.name or self.task.description
+              event_data["task_id"] = str(self.task.id)
+            crewai_event_bus.emit(self, ToolUsageStartedEvent(**event_data))
 
         started_at = time.time()
         from_cache = False
@@ -313,12 +315,15 @@ class ToolUsage:
             self.agent.tools_results.append(data)
             #self.tools_handler.on_tool_end(calling.tool_name)
 
-        if available_tool and hasattr(available_tool, 'current_usage_count'):
+        if available_tool and hasattr(available_tool, "current_usage_count"):
             available_tool.current_usage_count += 1
-            if hasattr(available_tool, 'max_usage_count') and available_tool.max_usage_count is not None:
+            if (
+                hasattr(available_tool, "max_usage_count")
+                and available_tool.max_usage_count is not None
+            ):
                 self._printer.print(
                     content=f"Tool '{available_tool.name}' usage: {available_tool.current_usage_count}/{available_tool.max_usage_count}",
-                    color="blue"
+                    color="blue",
                 )
 
         return result
@@ -364,7 +369,7 @@ class ToolUsage:
             Error message if limit reached, None otherwise
         """
         if (
-            hasattr(tool, 'max_usage_count')
+            hasattr(tool, "max_usage_count")
             and tool.max_usage_count is not None
             and tool.current_usage_count >= tool.max_usage_count
         ):
@@ -607,6 +612,9 @@ class ToolUsage:
                 "output": result,
             }
         )
+        if self.task:
+            event_data["task_id"] = str(self.task.id)
+            event_data["task_name"] = self.task.name or self.task.description
         crewai_event_bus.emit(self, ToolUsageFinishedEvent(**event_data))
 
     def _prepare_event_data(
