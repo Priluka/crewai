@@ -1,18 +1,20 @@
 from importlib.metadata import version as get_version
-from typing import Optional
 
 import click
 
 from crewai.cli.add_crew_to_flow import add_crew_to_flow
+from crewai.cli.config import Settings
 from crewai.cli.create_crew import create_crew
 from crewai.cli.create_flow import create_flow
 from crewai.cli.crew_chat import run_chat
+from crewai.cli.settings.main import SettingsCommand
 from crewai.memory.storage.kickoff_task_outputs_storage import (
     KickoffTaskOutputsSQLiteStorage,
 )
 
 from .authentication.main import AuthenticationCommand
 from .deploy.main import DeployCommand
+from .enterprise.main import EnterpriseConfigureCommand
 from .evaluate_crew import evaluate_crew
 from .install_crew import install_crew
 from .kickoff_flow import kickoff_flow
@@ -138,8 +140,12 @@ def log_tasks_outputs() -> None:
 @click.option("-s", "--short", is_flag=True, help="Reset SHORT TERM memory")
 @click.option("-e", "--entities", is_flag=True, help="Reset ENTITIES memory")
 @click.option("-kn", "--knowledge", is_flag=True, help="Reset KNOWLEDGE storage")
-@click.option("-akn", "--agent-knowledge", is_flag=True, help="Reset AGENT KNOWLEDGE storage")
-@click.option("-k","--kickoff-outputs",is_flag=True,help="Reset LATEST KICKOFF TASK OUTPUTS")
+@click.option(
+    "-akn", "--agent-knowledge", is_flag=True, help="Reset AGENT KNOWLEDGE storage"
+)
+@click.option(
+    "-k", "--kickoff-outputs", is_flag=True, help="Reset LATEST KICKOFF TASK OUTPUTS"
+)
 @click.option("-a", "--all", is_flag=True, help="Reset ALL memories")
 def reset_memories(
     long: bool,
@@ -154,13 +160,23 @@ def reset_memories(
     Reset the crew memories (long, short, entity, latest_crew_kickoff_ouputs, knowledge, agent_knowledge). This will delete all the data saved.
     """
     try:
-        memory_types = [long, short, entities, knowledge, agent_knowledge, kickoff_outputs, all]
+        memory_types = [
+            long,
+            short,
+            entities,
+            knowledge,
+            agent_knowledge,
+            kickoff_outputs,
+            all,
+        ]
         if not any(memory_types):
             click.echo(
                 "Please specify at least one memory type to reset using the appropriate flags."
             )
             return
-        reset_memories_command(long, short, entities, knowledge, agent_knowledge, kickoff_outputs, all)
+        reset_memories_command(
+            long, short, entities, knowledge, agent_knowledge, kickoff_outputs, all
+        )
     except Exception as e:
         click.echo(f"An error occurred while resetting memories: {e}", err=True)
 
@@ -211,28 +227,21 @@ def update():
 
 
 @crewai.command()
-def signup():
-    """Sign Up/Login to CrewAI+."""
-    AuthenticationCommand().signup()
-
-
-@crewai.command()
 def login():
-    """Sign Up/Login to CrewAI+."""
-    AuthenticationCommand().signup()
+    """Sign Up/Login to CrewAI Enterprise."""
+    Settings().clear_user_settings()
+    AuthenticationCommand().login()
 
 
 # DEPLOY CREWAI+ COMMANDS
 @crewai.group()
 def deploy():
     """Deploy the Crew CLI group."""
-    pass
 
 
 @crewai.group()
 def tool():
     """Tool Repository related commands."""
-    pass
 
 
 @deploy.command(name="create")
@@ -252,7 +261,7 @@ def deploy_list():
 
 @deploy.command(name="push")
 @click.option("-u", "--uuid", type=str, help="Crew UUID parameter")
-def deploy_push(uuid: Optional[str]):
+def deploy_push(uuid: str | None):
     """Deploy the Crew."""
     deploy_cmd = DeployCommand()
     deploy_cmd.deploy(uuid=uuid)
@@ -260,7 +269,7 @@ def deploy_push(uuid: Optional[str]):
 
 @deploy.command(name="status")
 @click.option("-u", "--uuid", type=str, help="Crew UUID parameter")
-def deply_status(uuid: Optional[str]):
+def deply_status(uuid: str | None):
     """Get the status of a deployment."""
     deploy_cmd = DeployCommand()
     deploy_cmd.get_crew_status(uuid=uuid)
@@ -268,7 +277,7 @@ def deply_status(uuid: Optional[str]):
 
 @deploy.command(name="logs")
 @click.option("-u", "--uuid", type=str, help="Crew UUID parameter")
-def deploy_logs(uuid: Optional[str]):
+def deploy_logs(uuid: str | None):
     """Get the logs of a deployment."""
     deploy_cmd = DeployCommand()
     deploy_cmd.get_crew_logs(uuid=uuid)
@@ -276,7 +285,7 @@ def deploy_logs(uuid: Optional[str]):
 
 @deploy.command(name="remove")
 @click.option("-u", "--uuid", type=str, help="Crew UUID parameter")
-def deploy_remove(uuid: Optional[str]):
+def deploy_remove(uuid: str | None):
     """Remove a deployment."""
     deploy_cmd = DeployCommand()
     deploy_cmd.remove_crew(uuid=uuid)
@@ -316,7 +325,6 @@ def tool_publish(is_public: bool, force: bool):
 @crewai.group()
 def flow():
     """Flow related commands."""
-    pass
 
 
 @flow.command(name="kickoff")
@@ -348,7 +356,7 @@ def chat():
     and using the Chat LLM to generate responses.
     """
     click.secho(
-        "\nStarting a conversation with the Crew\n" "Type 'exit' or Ctrl+C to quit.\n",
+        "\nStarting a conversation with the Crew\nType 'exit' or Ctrl+C to quit.\n",
     )
 
     run_chat()
@@ -357,11 +365,10 @@ def chat():
 @crewai.group(invoke_without_command=True)
 def org():
     """Organization management commands."""
-    pass
 
 
-@org.command()
-def list():
+@org.command("list")
+def org_list():
     """List available organizations."""
     org_command = OrganizationCommand()
     org_command.list()
@@ -380,6 +387,47 @@ def current():
     """Show current organization when 'crewai org' is called without subcommands."""
     org_command = OrganizationCommand()
     org_command.current()
+
+
+@crewai.group()
+def enterprise():
+    """Enterprise Configuration commands."""
+
+
+@enterprise.command("configure")
+@click.argument("enterprise_url")
+def enterprise_configure(enterprise_url: str):
+    """Configure CrewAI Enterprise OAuth2 settings from the provided Enterprise URL."""
+    enterprise_command = EnterpriseConfigureCommand()
+    enterprise_command.configure(enterprise_url)
+
+
+@crewai.group()
+def config():
+    """CLI Configuration commands."""
+
+
+@config.command("list")
+def config_list():
+    """List all CLI configuration parameters."""
+    config_command = SettingsCommand()
+    config_command.list()
+
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key: str, value: str):
+    """Set a CLI configuration parameter."""
+    config_command = SettingsCommand()
+    config_command.set(key, value)
+
+
+@config.command("reset")
+def config_reset():
+    """Reset all CLI configuration parameters to default values."""
+    config_command = SettingsCommand()
+    config_command.reset_all_settings()
 
 
 if __name__ == "__main__":

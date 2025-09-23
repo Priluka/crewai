@@ -1,13 +1,13 @@
 import time
 from typing import TYPE_CHECKING
 
+from crewai.events.event_listener import event_listener
 from crewai.memory.entity.entity_memory_item import EntityMemoryItem
 from crewai.memory.long_term.long_term_memory_item import LongTermMemoryItem
 from crewai.utilities import I18N
 from crewai.utilities.converter import ConverterError
 from crewai.utilities.evaluators.task_evaluator import TaskEvaluator
 from crewai.utilities.printer import Printer
-from crewai.utilities.events.event_listener import event_listener
 
 if TYPE_CHECKING:
     from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -21,6 +21,7 @@ class CrewAgentExecutorMixin:
     task: "Task"
     iterations: int
     max_iter: int
+    messages: list[dict[str, str]]
     _i18n: I18N
     _printer: Printer = Printer()
 
@@ -42,11 +43,9 @@ class CrewAgentExecutorMixin:
                         metadata={
                             "observation": self.task.description,
                         },
-                        agent=self.agent.role,
                     )
             except Exception as e:
                 print(f"Failed to add to short term memory: {e}")
-                pass
 
     def _create_external_memory(self, output) -> None:
         """Create and save a external-term memory item if conditions are met."""
@@ -62,12 +61,11 @@ class CrewAgentExecutorMixin:
                     value=output.text,
                     metadata={
                         "description": self.task.description,
+                        "messages": self.messages,
                     },
-                    agent=self.agent.role,
                 )
             except Exception as e:
                 print(f"Failed to add to external memory: {e}")
-                pass
 
     def _create_long_term_memory(self, output) -> None:
         """Create and save long-term and entity memory items based on evaluation."""
@@ -98,8 +96,8 @@ class CrewAgentExecutorMixin:
                 )
                 self.crew._long_term_memory.save(long_term_memory)
 
-                for entity in evaluation.entities:
-                    entity_memory = EntityMemoryItem(
+                entity_memories = [
+                    EntityMemoryItem(
                         name=entity.name,
                         type=entity.type,
                         description=entity.description,
@@ -107,13 +105,14 @@ class CrewAgentExecutorMixin:
                             [f"- {r}" for r in entity.relationships]
                         ),
                     )
-                    self.crew._entity_memory.save(entity_memory)
+                    for entity in evaluation.entities
+                ]
+                if entity_memories:
+                    self.crew._entity_memory.save(entity_memories)
             except AttributeError as e:
                 print(f"Missing attributes for long term memory: {e}")
-                pass
             except Exception as e:
                 print(f"Failed to add to long term memory: {e}")
-                pass
         elif (
             self.crew
             and self.crew._long_term_memory
@@ -123,7 +122,6 @@ class CrewAgentExecutorMixin:
                 content="Long term memory is enabled, but entity memory is not enabled. Please configure entity memory or set memory=True to automatically enable it.",
                 color="bold_yellow",
             )
-
 
     def _ask_human_input(self, final_answer: str) -> str:
       """Prompt human input with mode-appropriate messaging."""
@@ -181,4 +179,3 @@ class CrewAgentExecutorMixin:
             self.crew._human_wait_time = 0
           self.crew._human_wait_time += wait_duration  # THIS LINE IS NOW CORRECTLY INDENTED
         event_listener.formatter.resume_live_updates()
-

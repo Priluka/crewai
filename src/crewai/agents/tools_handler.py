@@ -1,39 +1,59 @@
+"""Tools handler for managing tool execution and caching."""
 from datetime import datetime
 import uuid
-from typing import Any, Optional, Union, Callable
-
+import json
+from collections.abc import Callable
+from typing import Any, Optional, Union
 from ..agentcloud.socket_io import AgentCloudSocketIO
-from ..tools.cache_tools.cache_tools import CacheTools
-from ..tools.tool_calling import InstructorToolCalling, ToolCalling
-from .cache.cache_handler import CacheHandler
+from crewai.agents.cache.cache_handler import CacheHandler
+from crewai.tools.cache_tools.cache_tools import CacheTools
+from crewai.tools.tool_calling import InstructorToolCalling, ToolCalling
 
 
 class ToolsHandler:
-    """Callback handler for tool usage."""
+    """Callback handler for tool usage.
 
-    last_used_tool: ToolCalling = {}  # type: ignore # BUG?: Incompatible types in assignment (expression has type "Dict[...]", variable has type "ToolCalling")
-    cache: Optional[CacheHandler]
+    Attributes:
+        last_used_tool: The most recently used tool calling instance.
+        cache: Optional cache handler for storing tool outputs.
+    """
     send_to_socket: Callable
 
     def __init__(self,  socket_io: Optional[AgentCloudSocketIO] = None, cache: Optional[CacheHandler] = None):
-        """Initialize the callback handler."""
-        self.cache = cache
-        self.last_used_tool: Union[ToolCalling, dict] = {}
-        self.socket_io = socket_io
-        self.tool_chunkId = None
+      """Initialize the callback handler.
 
+      Args:
+          cache: Optional cache handler for storing tool outputs.
+      """
+      self.cache: CacheHandler | None = cache
+      self.last_used_tool: ToolCalling | InstructorToolCalling | None = None
+      self.socket_io = socket_io
     def on_tool_use(
         self,
-        calling: Union[ToolCalling, InstructorToolCalling],
+        calling: ToolCalling | InstructorToolCalling,
         output: str,
         should_cache: bool = True,
-    ) -> Any:
-        """Run when tool ends running."""
-        self.last_used_tool = calling  # type: ignore # BUG?: Incompatible types in assignment (expression has type "Union[ToolCalling, InstructorToolCalling]", variable has type "ToolCalling")
+    ) -> None:
+        """Run when tool ends running.
+
+        Args:
+            calling: The tool calling instance.
+            output: The output from the tool execution.
+            should_cache: Whether to cache the tool output.
+        """
+        self.last_used_tool = calling
         if self.cache and should_cache and calling.tool_name != CacheTools().name:
+            # Convert arguments to string for cache
+            input_str = ""
+            if calling.arguments:
+                if isinstance(calling.arguments, dict):
+                    input_str = json.dumps(calling.arguments)
+                else:
+                    input_str = str(calling.arguments)
+
             self.cache.add(
                 tool=calling.tool_name,
-                input=calling.arguments,
+                input=input_str,
                 output=output,
             )
 

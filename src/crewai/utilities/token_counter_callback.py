@@ -1,5 +1,11 @@
+"""Token counting callback handler for LLM interactions.
+
+This module provides a callback handler that tracks token usage
+for LLM API calls through the litellm library.
+"""
+
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any,Dict, Optional
 
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.types.utils import Usage
@@ -8,6 +14,15 @@ from crewai.agents.agent_builder.utilities.base_token_process import TokenProces
 
 
 class TokenCalcHandler(CustomLogger):
+
+  """Handler for calculating and tracking token usage in LLM calls.
+
+  This handler integrates with litellm's logging system to track
+  prompt tokens, completion tokens, and cached tokens across requests.
+
+  Attributes:
+      token_cost_process: The token process tracker to accumulate usage metrics.
+  """
   def __init__(self, token_cost_process: Optional[TokenProcess]):
     self.token_cost_process = token_cost_process
     # Add Redis tracking attributes
@@ -23,8 +38,8 @@ class TokenCalcHandler(CustomLogger):
 
   def log_success_event(
     self,
-    kwargs: Dict[str, Any],
-    response_obj: Dict[str, Any],
+    kwargs: dict[str, Any],
+    response_obj: dict[str, Any],
     start_time: float,
     end_time: float,
   ) -> None:
