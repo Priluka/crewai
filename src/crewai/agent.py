@@ -90,7 +90,7 @@ class Agent(BaseAgent):
     """
 
     _times_executed: int = PrivateAttr(default=0)
-    name: str = Field(description="Name of the agent")
+    name: str | None = Field(default=None)
     max_execution_time: Optional[int] = Field(
         default=None,
         description="Maximum execution time for an agent to execute a task",
