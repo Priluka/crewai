@@ -655,6 +655,7 @@ class Agent(BaseAgent):
         # Check if we already have a TokenCalcHandler
         existing_token_handler = None
         existing_token_handler_index = None
+        step_callback_to_use = self.step_callback
         for i, cb in enumerate(self.callbacks):
           if isinstance(cb, TokenCalcHandler):
             existing_token_handler = cb
@@ -692,7 +693,13 @@ class Agent(BaseAgent):
         if hasattr(self.llm, 'callbacks'):
             self.llm.callbacks = self.callbacks
 
-        ########
+        step_callback_to_use = self.step_callback
+        if task and hasattr(task, '_custom_step_callback'):
+          step_callback_to_use = task._custom_step_callback
+        else:
+          step_callback_to_use = self.step_callback
+
+        ########################################
 
 
         self.agent_executor = CrewAgentExecutor(
@@ -708,7 +715,7 @@ class Agent(BaseAgent):
             tools_handler=self.tools_handler,
             tools_names=get_tool_names(parsed_tools),
             tools_description=render_text_description_and_args(parsed_tools),
-            step_callback=self.step_callback,
+            step_callback=step_callback_to_use,
             function_calling_llm=self.function_calling_llm,
             stop_generating_check=self.stop_generating_check,
             respect_context_window=self.respect_context_window,
