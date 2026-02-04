@@ -7,9 +7,10 @@ and memory management.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, cast, Optional
+import logging
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel, GetCoreSchemaHandler
+from pydantic import BaseModel, GetCoreSchemaHandler, ValidationError
 from pydantic_core import CoreSchema, core_schema
 
 from crewai.agents.agent_builder.base_agent_executor_mixin import CrewAgentExecutorMixin
@@ -28,6 +29,7 @@ from crewai.hooks.llm_hooks import (
     get_before_llm_call_hooks,
 )
 from crewai.utilities.agent_utils import (
+    aget_llm_response,
     enforce_rpm_limit,
     format_message_for_llm,
     get_llm_response,
@@ -44,9 +46,14 @@ from crewai.utilities.constants import TRAINING_DATA_FILE
 from crewai.utilities.i18n import I18N, get_i18n
 from crewai.utilities.printer import Printer
 from crewai.utilities.agent_error import AgentExecutionStoppedException
-from crewai.utilities.tool_utils import execute_tool_and_check_finality
+from crewai.utilities.tool_utils import (
+    aexecute_tool_and_check_finality,
+    execute_tool_and_check_finality,
+)
 from crewai.utilities.training_handler import CrewTrainingHandler
 
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from crewai.agent import Agent
@@ -89,6 +96,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         request_within_rpm_limit: Callable[[], bool] | None = None,
         callbacks: list[Any] | None = None,
         response_model: type[BaseModel] | None = None,
+        i18n: I18N | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -113,7 +121,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
             response_model: Optional Pydantic model for structured outputs.
         """
         self.stop_generating_check = stop_generating_check
-        self._i18n: I18N = get_i18n()
+        self._i18n: I18N = i18n or get_i18n()
         self.llm = llm
         self.task = task
         self.agent = agent
@@ -137,8 +145,8 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         self.messages: list[LLMMessage] = []
         self.iterations = 0
         self.log_error_after = 3
-        self.before_llm_call_hooks: list[Callable] = []
-        self.after_llm_call_hooks: list[Callable] = []
+        self.before_llm_call_hooks: list[Callable[..., Any]] = []
+        self.after_llm_call_hooks: list[Callable[..., Any]] = []
         self.before_llm_call_hooks.extend(get_before_llm_call_hooks())
         self.after_llm_call_hooks.extend(get_after_llm_call_hooks())
         if self.llm:
@@ -241,7 +249,20 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
                     response_model=self.response_model,
                     executor_context=self,
                 )
-                formatted_answer = process_llm_response(answer, self.use_stop_words)  # type: ignore[assignment]
+                if self.response_model is not None:
+                    try:
+                        self.response_model.model_validate_json(answer)
+                        formatted_answer = AgentFinish(
+                            thought="",
+                            output=answer,
+                            text=answer,
+                        )
+                    except ValidationError:
+                        formatted_answer = process_llm_response(
+                            answer, self.use_stop_words
+                        )  # type: ignore[assignment]
+                else:
+                    formatted_answer = process_llm_response(answer, self.use_stop_words)  # type: ignore[assignment]
 
                 if isinstance(formatted_answer, AgentAction):
                     # Extract agent fingerprint if available
@@ -275,7 +296,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
                     )
 
                 self._invoke_step_callback(formatted_answer)  # type: ignore[arg-type]
-                self._append_message(formatted_answer.text)  # type: ignore[union-attr,attr-defined]
+                self._append_message(formatted_answer.text)  # type: ignore[union-attr]
 
             except OutputParserError as e:
                 formatted_answer = handle_output_parser_exception(  # type: ignore[assignment]
@@ -309,6 +330,168 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         # (when the agent is using tools) and eventually becomes AgentFinish
         # (when the agent reaches a final answer). This check confirms we've
         # reached a final answer and helps type checking understand this transition.
+        if not isinstance(formatted_answer, AgentFinish):
+            raise RuntimeError(
+                "Agent execution ended without reaching a final answer. "
+                f"Got {type(formatted_answer).__name__} instead of AgentFinish."
+            )
+        self._show_logs(formatted_answer)
+        return formatted_answer
+
+    async def ainvoke(self, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Execute the agent asynchronously with given inputs.
+
+        Args:
+            inputs: Input dictionary containing prompt variables.
+
+        Returns:
+            Dictionary with agent output.
+        """
+        if "system" in self.prompt:
+            system_prompt = self._format_prompt(
+                cast(str, self.prompt.get("system", "")), inputs
+            )
+            user_prompt = self._format_prompt(
+                cast(str, self.prompt.get("user", "")), inputs
+            )
+            self.messages.append(format_message_for_llm(system_prompt, role="system"))
+            self.messages.append(format_message_for_llm(user_prompt))
+        else:
+            user_prompt = self._format_prompt(self.prompt.get("prompt", ""), inputs)
+            self.messages.append(format_message_for_llm(user_prompt))
+
+        self._show_start_logs()
+
+        self.ask_for_human_input = bool(inputs.get("ask_for_human_input", False))
+
+        try:
+            formatted_answer = await self._ainvoke_loop()
+        except AssertionError:
+            self._printer.print(
+                content="Agent failed to reach a final answer. This is likely a bug - please report it.",
+                color="red",
+            )
+            raise
+        except Exception as e:
+            handle_unknown_error(self._printer, e)
+            raise
+
+        if self.ask_for_human_input:
+            formatted_answer = self._handle_human_feedback(formatted_answer)
+
+        self._create_short_term_memory(formatted_answer)
+        self._create_long_term_memory(formatted_answer)
+        self._create_external_memory(formatted_answer)
+        return {"output": formatted_answer.output}
+
+    async def _ainvoke_loop(self) -> AgentFinish:
+        """Execute agent loop asynchronously until completion.
+
+        Returns:
+            Final answer from the agent.
+        """
+        formatted_answer = None
+        while not isinstance(formatted_answer, AgentFinish):
+            try:
+                if has_reached_max_iterations(self.iterations, self.max_iter):
+                    formatted_answer = handle_max_iterations_exceeded(
+                        formatted_answer,
+                        printer=self._printer,
+                        i18n=self._i18n,
+                        messages=self.messages,
+                        llm=self.llm,
+                        callbacks=self.callbacks,
+                    )
+                    break
+
+                enforce_rpm_limit(self.request_within_rpm_limit)
+
+                answer = await aget_llm_response(
+                    llm=self.llm,
+                    messages=self.messages,
+                    callbacks=self.callbacks,
+                    printer=self._printer,
+                    from_task=self.task,
+                    from_agent=self.agent,
+                    response_model=self.response_model,
+                    executor_context=self,
+                )
+
+                if self.response_model is not None:
+                    try:
+                        self.response_model.model_validate_json(answer)
+                        formatted_answer = AgentFinish(
+                            thought="",
+                            output=answer,
+                            text=answer,
+                        )
+                    except ValidationError:
+                        formatted_answer = process_llm_response(
+                            answer, self.use_stop_words
+                        )  # type: ignore[assignment]
+                else:
+                    formatted_answer = process_llm_response(answer, self.use_stop_words)  # type: ignore[assignment]
+
+                if isinstance(formatted_answer, AgentAction):
+                    fingerprint_context = {}
+                    if (
+                        self.agent
+                        and hasattr(self.agent, "security_config")
+                        and hasattr(self.agent.security_config, "fingerprint")
+                    ):
+                        fingerprint_context = {
+                            "agent_fingerprint": str(
+                                self.agent.security_config.fingerprint
+                            )
+                        }
+
+                    tool_result = await aexecute_tool_and_check_finality(
+                        agent_action=formatted_answer,
+                        fingerprint_context=fingerprint_context,
+                        tools=self.tools,
+                        i18n=self._i18n,
+                        agent_key=self.agent.key if self.agent else None,
+                        agent_role=self.agent.role if self.agent else None,
+                        tools_handler=self.tools_handler,
+                        task=self.task,
+                        agent=self.agent,
+                        function_calling_llm=self.function_calling_llm,
+                        crew=self.crew,
+                    )
+                    formatted_answer = self._handle_agent_action(
+                        formatted_answer, tool_result
+                    )
+
+                self._invoke_step_callback(formatted_answer)  # type: ignore[arg-type]
+                self._append_message(formatted_answer.text)  # type: ignore[union-attr]
+
+            except OutputParserError as e:
+                formatted_answer = handle_output_parser_exception(  # type: ignore[assignment]
+                    e=e,
+                    messages=self.messages,
+                    iterations=self.iterations,
+                    log_error_after=self.log_error_after,
+                    printer=self._printer,
+                )
+
+            except Exception as e:
+                if e.__class__.__module__.startswith("litellm"):
+                    raise e
+                if is_context_length_exceeded(e):
+                    handle_context_length(
+                        respect_context_window=self.respect_context_window,
+                        printer=self._printer,
+                        messages=self.messages,
+                        llm=self.llm,
+                        callbacks=self.callbacks,
+                        i18n=self._i18n,
+                    )
+                    continue
+                handle_unknown_error(self._printer, e)
+                raise e
+            finally:
+                self.iterations += 1
+
         if not isinstance(formatted_answer, AgentFinish):
             raise RuntimeError(
                 "Agent execution ended without reaching a final answer. "
@@ -395,7 +578,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         if self.agent is None:
             raise ValueError("Agent cannot be None")
 
-        crewai_event_bus.emit(
+        future = crewai_event_bus.emit(
             self.agent,
             AgentLogsExecutionEvent(
                 agent_role=self.agent.role,
@@ -404,6 +587,12 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
                 or (hasattr(self, "crew") and getattr(self.crew, "verbose", False)),
             ),
         )
+
+        if future is not None:
+            try:
+                future.result(timeout=5.0)
+            except Exception as e:
+                logger.error(f"Failed to show logs for agent execution event: {e}")
 
     def _handle_crew_training_output(
         self, result: AgentFinish, human_feedback: str | None = None

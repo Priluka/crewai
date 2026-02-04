@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
+from crewai.agents.parser import AgentFinish
 from crewai.events.event_listener import event_listener
 from crewai.memory.entity.entity_memory_item import EntityMemoryItem
 from crewai.memory.long_term.long_term_memory_item import LongTermMemoryItem
@@ -29,7 +30,7 @@ class CrewAgentExecutorMixin:
     _i18n: I18N
     _printer: Printer = Printer()
 
-    def _create_short_term_memory(self, output) -> None:
+    def _create_short_term_memory(self, output: AgentFinish) -> None:
         """Create and save a short-term memory item if conditions are met."""
         if (
             self.crew
@@ -53,7 +54,7 @@ class CrewAgentExecutorMixin:
                     "error", f"Failed to add to short term memory: {e}"
                 )
 
-    def _create_external_memory(self, output) -> None:
+    def _create_external_memory(self, output: AgentFinish) -> None:
         """Create and save a external-term memory item if conditions are met."""
         if (
             self.crew
@@ -75,7 +76,7 @@ class CrewAgentExecutorMixin:
                     "error", f"Failed to add to external memory: {e}"
                 )
 
-    def _create_long_term_memory(self, output) -> None:
+    def _create_long_term_memory(self, output: AgentFinish) -> None:
         """Create and save long-term and entity memory items based on evaluation."""
         if (
             self.crew
@@ -136,58 +137,64 @@ class CrewAgentExecutorMixin:
             )
 
     def _ask_human_input(self, final_answer: str) -> str:
-      """Prompt human input with mode-appropriate messaging."""
-      event_listener.formatter.pause_live_updates()
+        """Prompt human input with mode-appropriate messaging.
 
-      # Track wait start time
-      wait_start = time.perf_counter()
+        Note: The final answer is already displayed via the AgentLogsExecutionEvent
+        panel, so we only show the feedback prompt here.
+        """
+        from rich.panel import Panel
+        from rich.text import Text
 
-      try:
-        # Display the final answer to the user first
-        self._printer.print(
-          content=f"\033[1m\033[95m ## Final Result:\033[00m \033[92m{final_answer}\033[00m"
-        )
+        formatter = event_listener.formatter
+        formatter.pause_live_updates()
 
-        # Determine the appropriate prompt based on mode
-        if self.crew and getattr(self.crew, "_train", False):
-          prompt = (
-            "\n\n=====\n"
-            "## TRAINING MODE: Provide feedback to improve the agent's performance.\n"
-            "This will be used to train better versions of the agent.\n"
-            "Please provide detailed feedback about the result quality and reasoning process.\n"
-            "=====\n"
-          )
-        else:
-          prompt = (
-            "\n\n=====\n"
-            "## HUMAN FEEDBACK: Provide feedback on the Final Result and Agent's actions.\n"
-            "Please follow these guidelines:\n"
-            " - If you are happy with the result, simply hit Enter without typing anything.\n"
-            " - Otherwise, provide specific improvement requests.\n"
-            " - You can provide multiple rounds of feedback until satisfied.\n"
-            "=====\n"
-          )
+        # Track wait start time
+        wait_start = time.perf_counter()
 
-        # Show the prompt to explain what's expected
-        self._printer.print(content=prompt, color="bold_yellow")
+        try:
+            # Training mode prompt (single iteration)
+            if self.crew and getattr(self.crew, "_train", False):
+                prompt_text = (
+                    "TRAINING MODE: Provide feedback to improve the agent's performance.\n\n"
+                    "This will be used to train better versions of the agent.\n"
+                    "Please provide detailed feedback about the result quality and reasoning process."
+                )
+                title = "🎓 Training Feedback Required"
+            # Regular human-in-the-loop prompt (multiple iterations)
+            else:
+                prompt_text = (
+                    "Provide feedback on the Final Result above.\n\n"
+                    "• If you are happy with the result, simply hit Enter without typing anything.\n"
+                    "• Otherwise, provide specific improvement requests.\n"
+                    "• You can provide multiple rounds of feedback until satisfied."
+                )
+                title = "💬 Human Feedback Required"
 
-        # Get human input via socket method
-        response = self.agent.agentcloud_socket_io.get_human_input(
-          input_prompt=prompt  # Prompt message passed to human interface
-        )
+            content = Text()
+            content.append(prompt_text, style="yellow")
 
-        if response and response.strip() != "":
-          self._printer.print(content="\nProcessing your feedback...", color="cyan")
+            prompt_panel = Panel(
+                content,
+                title=title,
+                border_style="yellow",
+                padding=(1, 2),
+            )
+            formatter.console.print(prompt_panel)
 
-        return response if response else ""
-
-      finally:
-        # Calculate wait time
-        wait_end = time.perf_counter()
-        wait_duration = min(wait_end - wait_start, 300)  # Cap at 5 min (300 seconds)
-        # Store wait time on crew
-        if hasattr(self, 'crew') and self.crew:
-          if not hasattr(self.crew, '_human_wait_time'):
-            self.crew._human_wait_time = 0
-          self.crew._human_wait_time += wait_duration  # THIS LINE IS NOW CORRECTLY INDENTED
-        event_listener.formatter.resume_live_updates()
+            # Get human input via socket method
+            response = self.agent.agentcloud_socket_io.get_human_input(
+              input_prompt=prompt_text  # Prompt message passed to human interface
+            )
+            if response.strip() != "":
+                formatter.console.print("\n[cyan]Processing your feedback...[/cyan]")
+            return response
+        finally:
+            # Calculate wait time
+            wait_end = time.perf_counter()
+            wait_duration = min(wait_end - wait_start, 300)  # Cap at 5 min (300 seconds)
+            # Store wait time on crew
+            if hasattr(self, 'crew') and self.crew:
+                if not hasattr(self.crew, '_human_wait_time'):
+                    self.crew._human_wait_time = 0
+                self.crew._human_wait_time += wait_duration
+            event_listener.formatter.resume_live_updates()

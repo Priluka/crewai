@@ -7,14 +7,15 @@ from pydantic import BaseModel, constr, field_validator
 
 from crewai.agentcloud.types.socket import SocketMessage, SocketEvents, Message
 from .utils import check_instance_of_class
-from ..utilities import Logger
+# Import directly from module to avoid circular import via utilities/__init__.py
+from ..utilities.logger import Logger
 
 
 class AgentCloudSocketIO:
     """
     Wrapper containing methods for sending and receiving messages over sockets to AgentCloud
     """
-    logger = Logger(verbose_level=2)
+    logger = Logger(verbose=True)
 
     def __init__(self, socket: SimpleClient, session_id: str) -> None:
         self.socket = socket

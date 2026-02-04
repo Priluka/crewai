@@ -6,9 +6,17 @@ to a socket connection, compatible with CrewAI's litellm-based callback system.
 
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from litellm.integrations.custom_logger import CustomLogger
+if TYPE_CHECKING:
+    from litellm.integrations.custom_logger import CustomLogger
+else:
+    try:
+        from litellm.integrations.custom_logger import CustomLogger
+    except ImportError:
+
+        class CustomLogger:
+            """Fallback CustomLogger when litellm is not available."""
 
 
 class SocketStreamHandler(CustomLogger):
