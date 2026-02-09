@@ -54,12 +54,13 @@ class ApifyActorsTool(BaseTool):
     actor_tool: _ApifyActorsTool = Field(description="Apify Actor Tool")
     package_dependencies: list[str] = Field(default_factory=lambda: ["langchain-apify"])
 
-    def __init__(self, actor_name: str, *args: Any, **kwargs: Any) -> None:
-        if not os.environ.get("APIFY_API_TOKEN"):
+    def __init__(self, actor_name: str, apify_api_token: str | None = None, *args: Any, **kwargs: Any) -> None:
+        api_token = apify_api_token or os.environ.get("APIFY_API_TOKEN")
+        if not api_token:
             msg = (
-                "APIFY_API_TOKEN environment variable is not set. "
-                "Please set it to your API key, to learn how to get it, "
-                "see https://docs.apify.com/platform/integrations/api"
+                "APIFY_API_TOKEN not provided and environment variable is not set. "
+                "Please pass apify_api_token or set the env var. "
+                "See https://docs.apify.com/platform/integrations/api"
             )
             raise ValueError(msg)
 
@@ -70,7 +71,7 @@ class ApifyActorsTool(BaseTool):
                 "Could not import langchain_apify python package. "
                 "Please install it with `pip install langchain-apify` or `uv add langchain-apify`."
             ) from e
-        actor_tool = _ApifyActorsTool(actor_name)
+        actor_tool = _ApifyActorsTool(actor_name, apify_api_token=api_token)
 
         kwargs.update(
             {
