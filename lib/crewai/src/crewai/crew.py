@@ -1138,6 +1138,7 @@ class Crew(FlowTrackable, BaseModel):
 
             # Copy Redis tracking setup from any existing agent
         # This ensures manager agent tokens are tracked in Redis
+        redis_setup_done = False
         if self.agents:
           for agent in self.agents:
             if all(hasattr(agent, attr) for attr in ['_redis_client', '_session_id']):
