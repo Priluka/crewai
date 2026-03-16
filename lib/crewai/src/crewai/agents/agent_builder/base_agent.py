@@ -225,6 +225,12 @@ class BaseAgent(BaseModel, ABC, metaclass=AgentMeta):
         min_length=1,
     )
 
+    ##ADDED BY TEAMORA - AgentCloud socket IO
+    agentcloud_socket_io: Any = Field(
+        default=None,
+        description="AgentCloud socket IO instance for streaming.",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def process_model_config(cls, values: Any) -> dict[str, Any]:
@@ -485,13 +491,21 @@ class BaseAgent(BaseModel, ABC, metaclass=AgentMeta):
                 input_string=self._original_backstory, inputs=inputs
             )
 
+    def set_agentcloud_socket_io(self, socket_io: Any) -> None:
+        """Set the AgentCloud socket IO instance for the agent."""
+        self.agentcloud_socket_io = socket_io
+
+    def set_tools_handler(self) -> None:
+        """Set/reset the tools handler with socket IO if available."""
+        self.tools_handler = ToolsHandler(socket_io=self.agentcloud_socket_io)
+
     def set_cache_handler(self, cache_handler: CacheHandler) -> None:
         """Set the cache handler for the agent.
 
         Args:
             cache_handler: An instance of the CacheHandler class.
         """
-        self.tools_handler = ToolsHandler()
+        self.tools_handler = ToolsHandler(socket_io=self.agentcloud_socket_io)
         if self.cache:
             self.cache_handler = cache_handler
             self.tools_handler.cache = cache_handler

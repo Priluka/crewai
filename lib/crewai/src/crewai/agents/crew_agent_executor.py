@@ -110,6 +110,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         callbacks: list[Any] | None = None,
         response_model: type[BaseModel] | None = None,
         i18n: I18N | None = None,
+        stop_generating_check: Any = None,
     ) -> None:
         """Initialize executor.
 
@@ -153,6 +154,7 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
         self.respect_context_window = respect_context_window
         self.request_within_rpm_limit = request_within_rpm_limit
         self.response_model = response_model
+        self.stop_generating_check = stop_generating_check or (lambda: False)
         self.ask_for_human_input = False
         self.messages: list[LLMMessage] = []
         self.iterations = 0
@@ -430,6 +432,13 @@ class CrewAgentExecutor(CrewAgentExecutorMixin):
 
                 self._invoke_step_callback(formatted_answer)  # type: ignore[arg-type]
                 self._append_message(formatted_answer.text)  # type: ignore[union-attr]
+
+                ##ADDED BY TEAMORA - Check if generation should be stopped
+                if self.stop_generating_check():
+                    formatted_answer = AgentFinish(
+                        thought="", output="Agent execution terminated by user", text="Agent execution terminated by user"
+                    )
+                    break
 
             except OutputParserError as e:
                 formatted_answer = handle_output_parser_exception(  # type: ignore[assignment]

@@ -45,6 +45,16 @@ class TokenCalcHandler(CustomLogger):
         """
         super().__init__(**kwargs)
         self.token_cost_process = token_cost_process
+        # ADDED BY TEAMORA - Redis tracking attributes
+        self.redis_client = None
+        self.session_id = None
+        self.model_id = None
+
+    def setup_redis_tracking(self, redis_client: Any, session_id: str, model_id: str) -> None:
+        """Setup Redis tracking for this handler."""
+        self.redis_client = redis_client
+        self.session_id = session_id
+        self.model_id = model_id
 
     def log_success_event(
         self,
@@ -83,3 +93,24 @@ class TokenCalcHandler(CustomLogger):
                         self.token_cost_process.sum_cached_prompt_tokens(
                             usage.prompt_tokens_details.cached_tokens
                         )
+
+                    # ADDED BY TEAMORA - Redis tracking
+                    if self.redis_client and self.session_id and self.model_id:
+                        try:
+                            key = f"tokens:{self.session_id}:{self.model_id}"
+                            if hasattr(usage, "prompt_tokens") and usage.prompt_tokens:
+                                self.redis_client.redis_client.hincrby(key, "prompt", usage.prompt_tokens)
+                            if hasattr(usage, "completion_tokens") and usage.completion_tokens:
+                                self.redis_client.redis_client.hincrby(key, "completion", usage.completion_tokens)
+                            if (
+                                hasattr(usage, "prompt_tokens_details")
+                                and usage.prompt_tokens_details
+                                and hasattr(usage.prompt_tokens_details, "cached_tokens")
+                                and usage.prompt_tokens_details.cached_tokens
+                            ):
+                                self.redis_client.redis_client.hincrby(
+                                    key, "cached", usage.prompt_tokens_details.cached_tokens
+                                )
+                            self.redis_client.redis_client.expire(key, 86400)
+                        except Exception:
+                            pass

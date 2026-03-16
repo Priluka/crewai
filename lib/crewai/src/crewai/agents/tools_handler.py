@@ -24,14 +24,16 @@ class ToolsHandler:
         cache: Optional cache handler for storing tool outputs.
     """
 
-    def __init__(self, cache: CacheHandler | None = None) -> None:
+    def __init__(self, socket_io: Any = None, cache: CacheHandler | None = None) -> None:
         """Initialize the callback handler.
 
         Args:
+            socket_io: Optional AgentCloud socket IO instance.
             cache: Optional cache handler for storing tool outputs.
         """
         self.cache: CacheHandler | None = cache
         self.last_used_tool: ToolCalling | InstructorToolCalling | None = None
+        self.socket_io = socket_io
 
     def on_tool_use(
         self,
