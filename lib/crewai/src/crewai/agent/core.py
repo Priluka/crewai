@@ -83,6 +83,7 @@ from crewai.utilities.pydantic_schema_utils import generate_model_description
 from crewai.utilities.string_utils import sanitize_tool_name
 from crewai.utilities.token_counter_callback import TokenCalcHandler
 from crewai.utilities.training_handler import CrewTrainingHandler
+from crewai.agentcloud.socket_stream_handler import SocketStreamHandler
 
 
 try:
@@ -145,6 +146,10 @@ class Agent(BaseAgent):
     step_callback: Any | None = Field(
         default=None,
         description="Callback to be executed after each step of the agent execution.",
+    )
+    stop_generating_check: Any = Field(
+        default_factory=lambda: lambda: False,
+        description="Function that returns whether generation should be stopped",
     )
     use_system_prompt: bool | None = Field(
         default=True,
@@ -856,6 +861,62 @@ class Agent(BaseAgent):
             self._rpm_controller.check_or_wait if self._rpm_controller else None
         )
 
+        ##ADDED BY TEAMORA - Socket stream handler
+        socket_stream_handler = None
+        if task is not None and hasattr(self, 'agentcloud_socket_io') and self.agentcloud_socket_io:
+            socket_stream_handler = SocketStreamHandler(
+                socket_io=self.agentcloud_socket_io,
+                agent_name=self.name or self.role,
+                task_name=task.name or task.description,
+                tools_names=get_tool_names(parsed_tools),
+                stream_only_final_output=getattr(task, 'stream_only_final_output', False),
+            )
+
+        # ADDED BY TEAMORA TOKEN HANDLER MANAGEMENT
+        # Check if we already have a TokenCalcHandler
+        existing_token_handler = None
+        for i, cb in enumerate(self.callbacks):
+            if isinstance(cb, TokenCalcHandler):
+                existing_token_handler = cb
+                break
+
+        if existing_token_handler:
+            # If it doesn't have Redis tracking but we now have the required attributes, update it
+            if not getattr(existing_token_handler, 'redis_client', None) and all(hasattr(self, attr) for attr in ['_redis_client', '_session_id', '_model_id']):
+                existing_token_handler.setup_redis_tracking(
+                    redis_client=self._redis_client,
+                    session_id=self._session_id,
+                    model_id=self._model_id,
+                )
+        else:
+            # Create new handler only if none exists
+            token_handler = TokenCalcHandler(self._token_process)
+            if all(hasattr(self, attr) for attr in ['_redis_client', '_session_id', '_model_id']):
+                token_handler.setup_redis_tracking(
+                    redis_client=self._redis_client,
+                    session_id=self._session_id,
+                    model_id=self._model_id,
+                )
+            self.callbacks.append(token_handler)
+
+        # SOCKET HANDLER MANAGEMENT - Only add if task is provided
+        if socket_stream_handler is not None:
+            # Remove any existing SocketStreamHandler to avoid duplicates
+            self.callbacks = [
+                cb for cb in self.callbacks
+                if not isinstance(cb, SocketStreamHandler)
+            ]
+            self.callbacks.append(socket_stream_handler)
+
+        # Set callbacks on llm
+        if hasattr(self.llm, 'callbacks'):
+            self.llm.callbacks = self.callbacks
+
+        # ADDED BY TEAMORA - Custom step callback per task
+        step_callback_to_use = self.step_callback
+        if task and hasattr(task, '_custom_step_callback'):
+            step_callback_to_use = task._custom_step_callback
+
         if self.agent_executor is not None:
             self._update_executor_parameters(
                 task=task,
@@ -880,11 +941,12 @@ class Agent(BaseAgent):
                 tools_handler=self.tools_handler,
                 tools_names=get_tool_names(parsed_tools),
                 tools_description=render_text_description_and_args(parsed_tools),
-                step_callback=self.step_callback,
+                step_callback=step_callback_to_use,
                 function_calling_llm=self.function_calling_llm,
+                stop_generating_check=self.stop_generating_check,
                 respect_context_window=self.respect_context_window,
                 request_within_rpm_limit=rpm_limit_fn,
-                callbacks=[TokenCalcHandler(self._token_process)],
+                callbacks=self.callbacks,
                 response_model=(
                     task.response_model or task.output_pydantic or task.output_json
                 )

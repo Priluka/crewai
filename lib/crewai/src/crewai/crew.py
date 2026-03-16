@@ -47,8 +47,10 @@ except ImportError:
         return []
 
 
+from socketio import SimpleClient
 from crewai.agent import Agent
 from crewai.agents.agent_builder.base_agent import BaseAgent
+from crewai.agentcloud.socket_io import AgentCloudSocketIO
 from crewai.agents.cache.cache_handler import CacheHandler
 from crewai.crews.crew_output import CrewOutput
 from crewai.crews.utils import (
@@ -303,6 +305,19 @@ class Crew(FlowTrackable, BaseModel):
         default=None,
         description="Whether to enable tracing for the crew. True=always enable, False=always disable, None=check environment/user settings.",
     )
+    ##ADDED BY TEAMORA - AgentCloud socket fields
+    agentcloud_socket: InstanceOf[SimpleClient] | None = Field(
+        default=None,
+        description="AgentCloud socket client for streaming.",
+    )
+    agentcloud_session_id: str | None = Field(
+        default=None,
+        description="AgentCloud session ID.",
+    )
+    stop_generating_check: Any = Field(
+        default_factory=lambda: lambda: False,
+        description="Function that returns whether generation should be stopped",
+    )
 
     @field_validator("id", mode="before")
     @classmethod
@@ -430,7 +445,17 @@ class Crew(FlowTrackable, BaseModel):
         if self.config:
             self._setup_from_config()
 
-        if self.agents:
+        ##ADDED BY TEAMORA - Socket IO propagation
+        if self.agentcloud_socket and self.agentcloud_session_id:
+            socket_io = AgentCloudSocketIO(self.agentcloud_socket, self.agentcloud_session_id)
+            for agent in self.agents:
+                agent.set_agentcloud_socket_io(socket_io)
+                agent.set_tools_handler()
+                if self.cache:
+                    agent.set_cache_handler(self._cache_handler)
+                if self.max_rpm:
+                    agent.set_rpm_controller(self._rpm_controller)
+        elif self.agents:
             for agent in self.agents:
                 if self.cache:
                     agent.set_cache_handler(self._cache_handler)
@@ -1171,6 +1196,27 @@ class Crew(FlowTrackable, BaseModel):
             )
             self.manager_agent = manager
         manager.crew = self
+
+        ##ADDED BY TEAMORA - Copy Redis tracking setup to manager agent
+        redis_setup_done = False
+        if self.agents:
+            for agent in self.agents:
+                if all(hasattr(agent, attr) for attr in ['_redis_client', '_session_id']):
+                    manager._redis_client = agent._redis_client
+                    manager._session_id = agent._session_id
+                    if hasattr(self, '_manager_model_id'):
+                        manager._model_id = self._manager_model_id
+                    elif hasattr(agent, '_model_id'):
+                        manager._model_id = agent._model_id
+                    else:
+                        manager._model_id = "unknown_manager"
+                    redis_setup_done = True
+                    break
+
+        # Set socket IO on manager too
+        if self.agentcloud_socket and self.agentcloud_session_id:
+            socket_io = AgentCloudSocketIO(self.agentcloud_socket, self.agentcloud_session_id)
+            manager.set_agentcloud_socket_io(socket_io)
 
     def _get_execution_start_index(self, tasks: list[Task]) -> int | None:
         return None

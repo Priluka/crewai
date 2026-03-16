@@ -256,7 +256,8 @@ class SyncHumanInputProvider(HumanInputProvider):
         answer = current_answer
 
         while context.ask_for_human_input:
-            if feedback.strip() == "":
+            ##ADDED BY TEAMORA - Accept "continue" as approval
+            if feedback.strip().lower() in ["", "continue"]:
                 context.ask_for_human_input = False
             else:
                 context.messages.append(context._format_feedback_message(feedback))
@@ -310,7 +311,8 @@ class SyncHumanInputProvider(HumanInputProvider):
         answer = current_answer
 
         while context.ask_for_human_input:
-            if feedback.strip() == "":
+            ##ADDED BY TEAMORA - Accept "continue" as approval
+            if feedback.strip().lower() in ["", "continue"]:
                 context.ask_for_human_input = False
             else:
                 context.messages.append(context._format_feedback_message(feedback))
