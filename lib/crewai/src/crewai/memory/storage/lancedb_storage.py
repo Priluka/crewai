@@ -71,10 +71,17 @@ class LanceDBStorage:
                 from crewai.utilities.paths import db_storage_path
 
                 path = Path(db_storage_path()) / "memory"
-        self._path = Path(path)
-        self._path.mkdir(parents=True, exist_ok=True)
+
+        path_str = str(path)
+        # Cloud URIs (s3://, gs://) are handled natively by lancedb.connect()
+        # and must not be wrapped in Path() or mkdir()'d.
+        if path_str.startswith("s3://") or path_str.startswith("gs://"):
+            self._path = None
+        else:
+            self._path = Path(path)
+            self._path.mkdir(parents=True, exist_ok=True)
         self._table_name = table_name
-        self._db = lancedb.connect(str(self._path))
+        self._db = lancedb.connect(path_str)
 
         try:
             import resource
@@ -88,7 +95,7 @@ class LanceDBStorage:
         self._compact_every = compact_every
         self._save_count = 0
 
-        self._lock_name = f"lancedb:{self._path.resolve()}"
+        self._lock_name = f"lancedb:{self._path.resolve() if self._path else path_str}"
 
         # Try to open an existing table and infer dimension from its schema.
         # If no table exists yet, defer creation until the first save so the
